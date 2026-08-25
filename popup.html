@@ -3,99 +3,61 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>历史记录清理</title>
+    <title>浏览器搭子</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <div id="app">
-      <!-- 不兼容提示（默认隐藏，仅非 Chromium / 无 history 权限时显示） -->
-      <div id="incompatible" class="incompatible hidden">
-        <h2>当前浏览器不支持</h2>
-        <p>
-          本插件需要基于 <code>Chromium</code> 内核的浏览器，并授予
-          <code>history</code> 权限。
-        </p>
-        <p>请使用 Chrome / Edge / Brave / Arc / Opera 等浏览器打开。</p>
-      </div>
+    <!-- 液态玻璃背景光斑 -->
+    <div class="bg-orbs" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="orb orb-c"></span>
+    </div>
 
-      <!-- 主界面 -->
-      <div id="main" class="hidden">
-        <header class="header">
-          <div class="brand-row">
-            <span class="brand-dot"></span>
-            <h1>历史记录清理</h1>
-            <span id="brand-pill" class="brand-pill">检测中…</span>
-          </div>
-          <p class="subtitle">按时间段查询、预览、安全删除浏览器历史</p>
-        </header>
-
-        <div class="warn-banner">⚠️ 删除操作不可逆，建议先「导出备份」</div>
-
-        <!-- 日期范围 -->
-        <section class="section">
-          <div class="preset-group" id="preset-group">
-            <button class="preset-btn" data-preset="today">今天</button>
-            <button class="preset-btn" data-preset="7d">最近 7 天</button>
-            <button class="preset-btn" data-preset="30d">最近 30 天</button>
-            <button class="preset-btn" data-preset="custom">自定义</button>
-          </div>
-          <div class="date-range">
-            <label>起始日期<input type="date" id="start-date" /></label>
-            <label>结束日期<input type="date" id="end-date" /></label>
-            <button id="search-btn" class="primary-btn">查询</button>
-          </div>
-        </section>
-
-        <!-- 实时过滤 -->
-        <section class="section filter-row">
-          <input
-            type="search"
-            id="filter-input"
-            placeholder="🔍 按标题或 URL 实时过滤…"
-          />
-        </section>
-
-        <!-- 列表 -->
-        <section class="section list-section">
-          <div class="toolbar">
-            <label class="select-all">
-              <input type="checkbox" id="select-all" /> 全选
-            </label>
-            <span class="count-label" id="count-label">共 0 条</span>
-            <div class="export-group">
-              <button class="ghost-btn" id="export-json">导出 JSON</button>
-              <button class="ghost-btn" id="export-csv">导出 CSV</button>
-            </div>
-          </div>
-          <div id="loading" class="loading hidden">查询中…</div>
-          <div id="list" class="list"></div>
-        </section>
-
-        <!-- 操作 -->
-        <footer class="footer">
-          <button id="delete-selected" class="danger-btn" disabled>
-            删除选中
-          </button>
-          <button id="delete-all" class="danger-btn">删除全部</button>
-        </footer>
-      </div>
-
-      <!-- 二次确认弹窗 -->
-      <div id="overlay" class="overlay hidden">
-        <div class="confirm-dialog">
-          <h3>确认删除？</h3>
-          <p id="confirm-text">此操作不可逆。</p>
-          <div class="confirm-actions">
-            <button id="confirm-cancel" class="ghost-btn">取消</button>
-            <button id="confirm-ok" class="danger-btn" style="flex: 0 0 auto">
-              确认删除
-            </button>
-          </div>
+    <!-- 顶部导航栏 -->
+    <header class="topbar glass">
+      <div class="brand">
+        <img class="brand-icon" src="icons/icon32.png" alt="logo" width="22" height="22" />
+        <div class="brand-text">
+          <span class="brand-title">浏览器搭子</span>
+          <span class="brand-sub" id="brandSub">Chromium 浏览器</span>
         </div>
       </div>
+      <nav class="nav" id="nav">
+        <button class="nav-item active" data-view="home">概览</button>
+        <button class="nav-item" data-view="history">历史</button>
+        <button class="nav-item" data-view="tabs">标签</button>
+        <button class="nav-item" data-view="bookmarks">书签</button>
+        <button class="nav-item" data-view="downloads">下载</button>
+        <button class="nav-item" data-view="cleanup">清理</button>
+        <button class="nav-item" data-view="sessions">会话</button>
+      </nav>
+    </header>
 
-      <div id="toast" class="toast hidden"></div>
+    <main class="content" id="content"></main>
+
+    <!-- 二次确认弹窗 -->
+    <div class="modal-mask" id="modalMask" hidden>
+      <div class="modal glass">
+        <h3 id="modalTitle"></h3>
+        <p id="modalBody"></p>
+        <div class="modal-actions">
+          <button class="btn" id="modalCancel">取消</button>
+          <button class="btn btn-danger" id="modalOk">确认</button>
+        </div>
+      </div>
     </div>
+
+    <div class="toast-wrap" id="toastWrap"></div>
+
+    <!-- 核心：命名空间、工具、导航、概览 -->
     <script src="popup.js"></script>
+    <!-- 功能模块（经典脚本，按依赖顺序加载） -->
+    <script src="modules/history.js"></script>
+    <script src="modules/tabs.js"></script>
+    <script src="modules/bookmarks.js"></script>
+    <script src="modules/downloads.js"></script>
+    <script src="modules/cleanup.js"></script>
+    <script src="modules/sessions.js"></script>
   </body>
 </html>
