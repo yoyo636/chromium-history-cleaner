@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "浏览器历史记录清理工具",
+  "version": "1.0.0",
+  "description": "通用 Chromium 历史记录管理插件：按时间段查询、预览、搜索并安全删除浏览器历史，支持 JSON/CSV 导出备份。兼容 Chrome、Edge、Brave、Arc、Opera、360 极速版、Cent Browser 等所有 Chromium 内核浏览器。",
+  "permissions": [
+    "history",
+    "storage",
+    "downloads"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "历史记录清理",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
