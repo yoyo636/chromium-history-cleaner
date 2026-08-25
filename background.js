@@ -1,80 +1,97 @@
 /* -------------------------------------------------------------------------
  * background.js — Manifest V3 Service Worker
  * 集中代理危险的 history 操作（查询 / 按范围删除 / 按 URL 删除），
- * 由 popup 通过 chrome.runtime.sendMessage 调用，便于统一错误处理与扩展。
+ * 并提供书签「死链检测」（通过 no-cors 探测，无需额外主机权限）。
  * ------------------------------------------------------------------------- */
 
 'use strict';
 
-/**
- * 处理来自 popup 的消息。
- * 返回 true 表示将异步调用 sendResponse（Promise 形式）。
- * @param {object} msg 消息体，含 type 字段
- * @param {object} _sender 发送者信息（此处未使用）
- * @param {function} sendResponse 回调
- * @returns {boolean} 是否保持消息通道开放
- */
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  switch (msg.type) {
+  const type = msg && msg.type;
+  const payload = (msg && msg.payload) || {};
+  const reply = (ok, data, error) =>
+    sendResponse({ ok, data: data == null ? null : data, error: error || null });
+
+  switch (type) {
     case 'SEARCH':
-      return handleSearch(msg, sendResponse);
+      chrome.history.search(
+        {
+          text: '',
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          maxResults: payload.maxResults || 100,
+        },
+        (items) => {
+          if (chrome.runtime.lastError)
+            return reply(false, null, chrome.runtime.lastError.message);
+          reply(
+            true,
+            (items || []).map((i) => ({
+              title: i.title,
+              url: i.url,
+              lastVisitTime: i.lastVisitTime,
+              visitCount: i.visitCount,
+            }))
+          );
+        }
+      );
+      return true;
+
     case 'DELETE_RANGE':
-      return handleDeleteRange(msg, sendResponse);
+      chrome.history.deleteRange(
+        { startTime: payload.startTime, endTime: payload.endTime },
+        () => {
+          if (chrome.runtime.lastError)
+            return reply(false, null, chrome.runtime.lastError.message);
+          reply(true, true);
+        }
+      );
+      return true;
+
     case 'DELETE_URL':
-      return handleDeleteUrl(msg, sendResponse);
+      chrome.history.deleteUrl({ url: payload.url }, () => {
+        if (chrome.runtime.lastError)
+          return reply(false, null, chrome.runtime.lastError.message);
+        reply(true, true);
+      });
+      return true;
+
+    case 'CHECK_LINKS':
+      Promise.all((payload.urls || []).map(checkLink))
+        .then((res) => reply(true, res))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
     default:
-      sendResponse({ ok: false, error: '未知的消息类型: ' + msg.type });
+      reply(false, null, '未知的消息类型: ' + type);
       return false;
   }
 });
 
 /**
- * 按时间范围查询历史记录。
- * chrome.history.search 通过 startTime / endTime 过滤访问时间，
- * text 传空串表示匹配全部；maxResults 上限受浏览器限制（通常 ≤ 100）。
+ * 探测单个 URL 是否可达。
+ * 使用 no-cors 模式，故只会因「网络层失败」（域名失效 / 连接被拒）而 reject，
+ * 404/500 等仍会 resolve（得到不透明响应）。这足以识别「死链 / 失效书签」。
+ * @param {string} url
+ * @returns {Promise<{url:string, ok:boolean}>}
  */
-function handleSearch(msg, sendResponse) {
-  chrome.history
-    .search({
-      text: msg.text || '',
-      startTime: msg.startTime,
-      endTime: msg.endTime,
-      maxResults: msg.maxResults || 100,
+function checkLink(url) {
+  return new Promise((resolve) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    fetch(url, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: ctrl.signal,
     })
-    .then((items) => sendResponse({ ok: true, items: items || [] }))
-    .catch((err) => sendResponse({ ok: false, error: errMessage(err) }));
-  return true;
-}
-
-/**
- * 删除指定时间范围内的【全部】历史记录。
- * deleteRange 不依赖预览完整性，可覆盖整个时间段内的所有访问。
- */
-function handleDeleteRange(msg, sendResponse) {
-  chrome.history
-    .deleteRange({ startTime: msg.startTime, endTime: msg.endTime })
-    .then(() => sendResponse({ ok: true }))
-    .catch((err) => sendResponse({ ok: false, error: errMessage(err) }));
-  return true;
-}
-
-/**
- * 删除指定 URL 的全部历史访问记录。
- */
-function handleDeleteUrl(msg, sendResponse) {
-  chrome.history
-    .deleteUrl({ url: msg.url })
-    .then(() => sendResponse({ ok: true }))
-    .catch((err) => sendResponse({ ok: false, error: errMessage(err) }));
-  return true;
-}
-
-/**
- * 统一提取错误信息文本。
- * @param {*} err
- * @returns {string}
- */
-function errMessage(err) {
-  if (!err) return '未知错误';
-  return err.message || String(err);
+      .then(() => {
+        clearTimeout(timer);
+        resolve({ url, ok: true });
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve({ url, ok: false });
+      });
+  });
 }
