@@ -1,23 +1,24 @@
-# Chromium 历史记录清理插件（Manifest V3）
+# 浏览器搭子 · 历史与标签页管家（Manifest V3）
 
-通用 Chromium 浏览器历史记录管理插件：按时间段 **查询 / 预览 / 搜索 / 安全删除** 浏览器历史，并支持将目标时段记录 **导出为 JSON / CSV 备份**。
+一款实用的 Chromium 浏览器「搭子」：把历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档六大常用能力收进一个弹窗，**一套代码兼容所有 Chromium 内核浏览器**，液态玻璃界面、跟随系统的亮/暗色自适应。
 
-> 替代传统的 macOS `bash + sqlite3` 脚本方案——无需关闭浏览器、不依赖 sqlite3、一套代码兼容所有 Chromium 内核浏览器、自带可视化 GUI 与不可逆操作二次确认。
+> 替代传统的 `bash + sqlite3` 方案——无需关闭浏览器、不依赖 sqlite3、不关心各浏览器 `History` 文件路径，可视化操作、可逆备份、二次确认。
 
 ---
 
-## ✨ 功能特性
+## ✨ 功能特性（实材实料）
 
-| 功能 | 说明 |
+| 模块 | 能力 |
 | --- | --- |
-| 📅 日期范围选择 | 起始 / 结束日期（YYYY-MM-DD），并提供「今天 / 最近 7 天 / 最近 30 天 / 自定义」快捷选项 |
-| 👀 记录预览 | 删除前先列出该时段历史：访问时间、标题、URL（超长自动截断，悬停显示完整），并显示总数 |
-| 🗑️ 删除操作 | 支持「删除选中」（多选复选框）或「删除全部」（整段范围），删除前强制二次确认 |
-| 🔍 实时搜索 | 按标题或 URL 关键词在预览列表中即时过滤 |
-| 💾 导出备份 | 将当前（过滤后）记录导出为 JSON 或 CSV（带 BOM，Excel 友好） |
-| 🛡️ 安全机制 | 明确不可逆警示、二次确认弹窗、删除前可先备份 |
-| 🌐 浏览器自适应 | 自动检测浏览器品牌并在 UI 显示（如「Microsoft Edge 历史记录清理」），对非 Chromium 给出友好提示 |
-| 🌗 主题自适应 | 跟随系统亮色 / 暗色模式 |
+| 🏠 概览 | 实时统计：打开标签数、书签总数、近 30 天下载、近 7 天历史；一键进入各模块 |
+| 📜 历史 | 按时间段（今天 / 7 天 / 30 天 / 自定义）查询预览；实时过滤；多选 / 全选删除；按范围删除；导出 JSON / CSV |
+| 🗂️ 标签 | 列出全部窗口的标签；过滤；关闭选中 / 关闭重复 / 按域名关闭 / 复制网址 / **存档会话** |
+| 🔖 书签 | 去重（按网址）；**死链检测**（探测失效书签）；导出 JSON / HTML（Netscape 格式）；删除选中 |
+| ⬇️ 下载 | 近期下载记录；打开文件 / 打开文件夹 / 复制来源 / 从记录中移除 |
+| 🧹 清理 | 按时间范围（1 小时 / 24 小时 / 7 天 / 全部）清理缓存、Cookie、历史、表单、密码等 |
+| 💾 会话 | 恢复「最近关闭」的标签与窗口；查看 / 恢复 / 删除自己存档的会话 |
+
+**安全机制**：删除类操作均二次确认 + 不可恢复警示；清理前可先导出备份；所有写操作的权限最小化。
 
 ---
 
@@ -25,14 +26,18 @@
 
 | 维度 | 选型 |
 | --- | --- |
-| 扩展规范 | **Manifest V3**（Service Worker 架构，非废弃的 MV2） |
+| 扩展规范 | **Manifest V3**（Service Worker，非废弃的 MV2） |
 | 前端语言 | 原生 **HTML + CSS + JavaScript**（无框架、无构建步骤、轻量） |
-| 样式方案 | 纯 CSS + CSS 变量；`prefers-color-scheme` 实现亮/暗自适应 |
-| 后台逻辑 | **Service Worker**（`background.js`）：集中代理历史查询与删除 |
-| 历史 API | `chrome.history.search` / `chrome.history.deleteRange` / `chrome.history.deleteUrl` |
+| 样式方案 | 纯 CSS + CSS 变量；`backdrop-filter` 实现液态玻璃；`prefers-color-scheme` 亮/暗自适应 |
+| 后台逻辑 | **Service Worker**（`background.js`）：集中代理历史查询/删除、书签死链探测 |
+| 历史 API | `chrome.history.search` / `deleteRange` / `deleteUrl` |
+| 标签 API | `chrome.tabs.query` / `remove` / `reload` / `create` |
+| 书签 API | `chrome.bookmarks.getTree` / `remove` |
+| 下载 API | `chrome.downloads.search` / `open` / `show` / `erase` / `download` |
+| 清理 API | `chrome.browsingData.remove` |
+| 会话 API | `chrome.sessions.getRecentlyClosed` / `restore`；自定义会话存于 `chrome.storage.local` |
 | 导出下载 | `chrome.downloads.download`（以 `data:` URL 内联，不落临时文件） |
-| 偏好存储 | `chrome.storage.local`（记忆上次使用的日期范围） |
-| 权限声明 | `history`（必需）、`storage`（偏好）、`downloads`（导出）— 最小化原则 |
+| 权限声明 | `history` `storage` `downloads` `tabs` `bookmarks` `browsingData` `sessions` — 最小化原则 |
 | 资源打包 | 全部本地化，**不引入任何外部 CDN** |
 | 图标生成 | 纯标准库 Python（`zlib` / `struct`）脚本 `generate_icons.py`，无需 Pillow |
 
@@ -42,43 +47,43 @@
 
 ```
 history-cleaner/
-├── manifest.json        # MV3 配置：权限、popup、service worker、图标
-├── popup.html           # 主界面结构
-├── popup.css            # 亮/暗色自适应样式（Chromium 设置页风格）
-├── popup.js             # 主逻辑：查询/预览/过滤/删除/导出/品牌检测
-├── background.js        # Service Worker：集中代理 history 查询与删除
-├── icons/               # 插件图标 16 / 32 / 48 / 128 PNG
-│   ├── icon16.png
-│   ├── icon32.png
-│   ├── icon48.png
-│   └── icon128.png
-├── generate_icons.py    # 纯标准库图标生成脚本（可选，开发用）
-└── README.md            # 本文档
+├── manifest.json          # MV3 配置：权限、popup、service worker、图标
+├── popup.html             # 主界面（顶部导航栏 + 内容区）
+├── popup.css              # 液态玻璃样式（亮/暗自适应）
+├── popup.js               # 核心：命名空间、工具、导航、概览仪表盘
+├── background.js          # Service Worker：历史代理 + 死链探测
+├── modules/
+│   ├── history.js         # 历史查询 / 预览 / 过滤 / 删除 / 导出
+│   ├── tabs.js            # 标签管理
+│   ├── bookmarks.js       # 书签去重 / 死链 / 导出
+│   ├── downloads.js       # 下载管理
+│   ├── cleanup.js         # 浏览数据清理
+│   └── sessions.js        # 会话存档
+├── icons/                 # 16 / 32 / 48 / 128 PNG
+├── generate_icons.py      # 纯标准库图标生成脚本（开发用，可选）
+└── README.md
 ```
 
 ---
 
-## ⚙️ 核心 API 调用逻辑
+## ⚙️ 核心 API 调用架构
 
 ```
-┌────────────┐   sendMessage    ┌────────────────┐   chrome.history.*   ┌──────────┐
-│  popup.js  │ ───────────────► │  background.js  │ ───────────────────► │  History │
-│  (UI/交互) │ ◄─────────────── │ (Service Worker)│ ◄─────────────────── │ (DB)     │
-└────────────┘   返回结果        └────────────────┘                      └──────────┘
+┌─────────┐  sendMessage   ┌──────────────┐  chrome.history.*  ┌────────┐
+│ popup / │ ─────────────► │ background.js │ ─────────────────► │ History│
+│ modules │ ◄───────────── │ (SW)          │ ◄───────────────── │        │
+└─────────┘   返回结果      └──────────────┘                    └────────┘
+   多数模块直接调用 chrome.* API（popup 已声明相应权限）；
+   危险/耗时操作（历史删除、死链探测）统一收口在 background.js。
 ```
 
-- **查询**：`popup.js` → `SEARCH` → `chrome.history.search({ text:'', startTime, endTime, maxResults })`
-- **删除选中**：`popup.js` → `DELETE_URL` → `chrome.history.deleteUrl({ url })`
-- **删除全部**：`popup.js` → `DELETE_RANGE` → `chrome.history.deleteRange({ startTime, endTime })`
-- **导出**：`popup.js` 直接调用 `chrome.downloads.download`（需用户手势，故在 popup 内完成）
-
-> ⚠️ **预览上限说明**：`chrome.history.search` 单次会议返回上限约 **100 条**，因此预览列表最多展示 100 条（已注明）。而「删除全部」走 `deleteRange`，直接覆盖整个时间范围，**不受预览上限影响**，可确保整段历史被清除。
+> ⚠️ **预览上限**：`chrome.history.search` 单次返回上限约 **100 条**，预览列表最多展示 100 条（已注明）。但「删除全部」走 `deleteRange`，直接覆盖整段范围，**不受预览上限影响**。
 
 ---
 
 ## 🚀 各浏览器本地加载测试
 
-通用步骤：打开扩展管理页 → 开启「**开发者模式**」→ 点击「**加载已解压的扩展程序**」→ 选择本插件目录 → 点击工具栏图标打开 popup。
+通用步骤：扩展管理页 → 开启「**开发者模式**」→「**加载已解压的扩展程序**」→ 选择 `history-cleaner` 目录 → 点击工具栏图标打开弹窗。
 
 | 浏览器 | 扩展管理地址 |
 | --- | --- |
@@ -86,45 +91,40 @@ history-cleaner/
 | Microsoft Edge | `edge://extensions` |
 | Brave | `brave://extensions` |
 | Opera | `opera://extensions` |
-| Arc | `chrome://extensions`（Arc 兼容 Chrome 扩展体系） |
-| 360 极速浏览器 | `chrome://extensions` |
-| Cent Browser | `chrome://extensions` |
-
-> 部分国产浏览器需先在「扩展管理」开启「开发者模式」才能加载本地解压扩展。
+| Arc | `chrome://extensions` |
+| 360 极速浏览器 / Cent Browser | `chrome://extensions`（需先开开发者模式） |
 
 **验证清单**：
-1. 顶部品牌胶囊正确显示当前浏览器名称；
-2. 点击「最近 7 天」能列出该时段历史并计数；
-3. 搜索框输入关键词可实时过滤；
-4. 勾选若干条后「删除选中」弹出二次确认，确认后列表刷新；
-5. 「删除全部」清空整段范围历史；
-6. 「导出 JSON / CSV」生成带时间戳的备份文件；
-7. 切换系统亮/暗色，界面随之切换。
+1. 顶部品牌胶囊显示当前浏览器名称；
+2. 概览统计可正常加载；
+3. 历史按「最近 7 天」列出并可计数、过滤、删除、导出；
+4. 标签可批量关闭重复 / 按域名关闭 / 存档会话；
+5. 书签「仅重复」可列出重复项，「检测死链」标出失效书签；
+6. 下载可打开 / 打开文件夹 / 移除记录；
+7. 清理按范围选择项目并执行（二次确认）；
+8. 会话可恢复最近关闭、恢复 / 删除已存档会话；
+9. 切换系统亮/暗色，界面随之切换。
 
 ---
 
 ## 🔁 与原 bash + sqlite3 方案的核心差异
 
-| 维度 | bash + sqlite3 方案 | 本插件（Manifest V3） |
+| 维度 | bash + sqlite3 | 本插件（MV3） |
 | --- | --- | --- |
-| 是否需要关闭浏览器 | 是（否则数据库被锁定，写入失败） | 否（标准 API 操作，浏览器可正常运行） |
-| 依赖 | 需安装 `sqlite3`、依赖系统路径 | 零外部依赖，全部打包在插件内 |
-| 多浏览器适配 | 每款浏览器 `History` 路径不同，需分别维护 | 一套代码兼容所有 Chromium 内核 |
-| 交互方式 | 命令行、无 GUI | 可视化弹窗，所见即所得 |
+| 是否需关闭浏览器 | 是（否则数据库锁定） | 否 |
+| 依赖 | 需 `sqlite3`、依赖系统路径 | 零外部依赖 |
+| 多浏览器适配 | 各浏览器路径不同，需分别维护 | 一套代码兼容所有 Chromium 内核 |
+| 交互 | 命令行、无 GUI | 可视化弹窗 |
 | 安全性 | 易误删、无确认、无备份 | 二次确认 + 导出备份 + 明确警示 |
-| 权限边界 | 直接读写用户文件系统数据库 | 仅申请 `history/storage/downloads` 最小权限 |
+| 权限边界 | 直接读写用户文件系统数据库 | 仅申请必要权限，走标准 API |
 
 ---
 
-## 📦 构建图标（可选）
-
-如需重新生成图标（无需 Pillow）：
+## 📦 重新生成图标（可选）
 
 ```bash
 python3 generate_icons.py
 ```
-
----
 
 ## 📄 许可证
 
