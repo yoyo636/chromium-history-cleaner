@@ -206,6 +206,7 @@
         ['cleanup', '数据清理', '扫描详情、一键清理'],
         ['sessions', '会话存档', '恢复关闭的页面'],
         ['stats', '数据统计', 'Top 域名与访问分析'],
+        ['fatigue', '护眼助手', '疲劳感知、阅读调整'],
         ['settings', '偏好设置', '主题、默认范围'],
       ];
       const shortcuts = HC.el('div', { class: 'shortcut-grid' });

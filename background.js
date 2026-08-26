@@ -192,6 +192,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .catch((e) => reply(false, null, e.message));
       return true;
 
+    case 'FATIGUE_REPORT':
+      handleFatigueReport(payload)
+        .then(() => reply(true, true))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'FATIGUE_GET':
+      chrome.storage.local.get({ eyecare: null }, (r) => reply(true, r.eyecare || null));
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -224,4 +234,77 @@ function checkLink(url) {
         resolve({ url, ok: false });
       });
   });
+}
+
+/* -------------------------------------------------------------------------
+ * 视觉疲劳自适应：接收 content.js 上报，写当日疲劳曲线并更新图标角标
+ * eyecare = {
+ *   enabled: boolean,          // 开关（popup 设置）
+ *   log: [{t, score}]          // 当日曲线（10 分钟一个桶，最多 288 点）
+ *   minutes: number            // 今日累计高强度（活动）分钟
+ *   lastLevel: number,         // 最近一次等级 1-5
+ *   lastScore: number,
+ *   date: 'YYYY-MM-DD',        // 当日标记（跨天自动重置曲线）
+ *   updatedAt: number
+ * }
+ * ------------------------------------------------------------------------- */
+const FATIGUE_BUCKET_MS = 10 * 60000;
+
+function fatigueDate(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function handleFatigueReport(payload) {
+  return new Promise((resolve) => {
+    const now = Date.now();
+    chrome.storage.local.get({ eyecare: null }, (r) => {
+      let ec = r.eyecare;
+      const today = fatigueDate(now);
+      if (!ec || ec.date !== today) {
+        // 跨天重置曲线（保留开关）
+        ec = {
+          enabled: ec ? ec.enabled !== false : true,
+          log: [],
+          minutes: 0,
+          date: today,
+        };
+      }
+      ec.log = ec.log || [];
+      // 10 分钟一个桶，合并
+      const bucket = Math.floor(now / FATIGUE_BUCKET_MS) * FATIGUE_BUCKET_MS;
+      const last = ec.log[ec.log.length - 1];
+      if (last && last.t === bucket) last.score = payload.score;
+      else {
+        ec.log.push({ t: bucket, score: payload.score });
+        if (ec.log.length > 288) ec.log.shift();
+      }
+      ec.minutes = (ec.minutes || 0) + (payload.activeDeltaMs || 0) / 60;
+      ec.lastLevel = payload.level;
+      ec.lastScore = payload.score;
+      ec.updatedAt = now;
+
+      chrome.storage.local.set({ eyecare: ec }, () => {
+        updateFatigueBadge(payload.level);
+        resolve();
+      });
+    });
+  });
+}
+
+function updateFatigueBadge(level) {
+  try {
+    chrome.action.setBadgeText({ text: String(level) });
+    const hour = new Date().getHours();
+    const night = hour >= 23 || hour < 6;
+    chrome.action.setBadgeBackgroundColor({
+      color: night ? '#c98a16' : '#4c7bf3', // 深夜用暖色提醒
+    });
+    chrome.action.setTitle({
+      title: `视觉疲劳等级 ${level}/5\n点击图标查看护眼仪表盘`,
+    });
+  } catch (_e) {
+    /* 忽略角标异常 */
+  }
 }

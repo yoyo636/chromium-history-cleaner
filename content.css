@@ -1,0 +1,187 @@
+/* -------------------------------------------------------------------------
+ * content.css — 视觉疲劳自适应（护眼）调整规则
+ * 由 content.js 在 <html> 上设置：
+ *   data-eyecare="1|2|3|4|5"      疲劳等级（1 正常，无调整）
+ *   data-eyecare-zone="main"      主阅读区（仅该区域做精细排版调整）
+ *   data-eyecare-type="code|table|article|generic"  内容类型
+ * 原则：
+ *   - 区域级自适应：导航栏/侧边栏保持原样，只调整主阅读区
+ *   - 提升对比度（非降低）、加大行高/字距/字重
+ *   - 图片与视频不受影响（color 不影响 img/video）
+ *   - 全部使用 transition 平滑过渡（配合 JS 的 30 秒渐进）
+ * ------------------------------------------------------------------------- */
+
+/* ---------- 平滑过渡：所有由插件触发的视觉变化都缓动 ---------- */
+[data-eyecare-zone="main"] p,
+[data-eyecare-zone="main"] li,
+[data-eyecare-zone="main"] h1,
+[data-eyecare-zone="main"] h2,
+[data-eyecare-zone="main"] h3,
+[data-eyecare-zone="main"] h4,
+[data-eyecare-zone="main"] blockquote,
+[data-eyecare-zone="main"] pre,
+[data-eyecare-zone="main"] code {
+  transition: line-height 0.8s ease, letter-spacing 0.8s ease,
+    color 1.2s ease, margin 0.8s ease, -webkit-text-stroke 0.8s ease;
+}
+
+/* =====================================================================
+ * 等级 2：轻微 — 行高与段落间距略增
+ * ===================================================================== */
+html[data-eyecare="2"] [data-eyecare-zone="main"] p,
+html[data-eyecare="2"] [data-eyecare-zone="main"] li {
+  line-height: 1.62 !important;
+}
+
+/* =====================================================================
+ * 等级 3：中度 — 更大行高 + 字距 + 加宽字重（提升可见度）
+ * ===================================================================== */
+html[data-eyecare="3"] [data-eyecare-zone="main"] p,
+html[data-eyecare="3"] [data-eyecare-zone="main"] li,
+html[data-eyecare="3"] [data-eyecare-zone="main"] blockquote {
+  line-height: 1.72 !important;
+  letter-spacing: 0.012em !important;
+  -webkit-text-stroke: 0.18px rgba(0, 0, 0, 0.3);
+}
+html[data-eyecare="3"] [data-eyecare-zone="main"] h1,
+html[data-eyecare="3"] [data-eyecare-zone="main"] h2,
+html[data-eyecare="3"] [data-eyecare-zone="main"] h3,
+html[data-eyecare="3"] [data-eyecare-zone="main"] h4 {
+  -webkit-text-stroke: 0.3px rgba(0, 0, 0, 0.32);
+}
+
+/* =====================================================================
+ * 等级 4：较重 — 更大间距 + 聚焦阅读模式（高亮当前段落，其余淡化）
+ * ===================================================================== */
+html[data-eyecare="4"] [data-eyecare-zone="main"] p,
+html[data-eyecare="4"] [data-eyecare-zone="main"] li,
+html[data-eyecare="4"] [data-eyecare-zone="main"] blockquote {
+  line-height: 1.82 !important;
+  letter-spacing: 0.016em !important;
+  -webkit-text-stroke: 0.3px rgba(0, 0, 0, 0.34);
+}
+html[data-eyecare="4"] [data-eyecare-zone="main"] > * {
+  opacity: 0.6;
+  transition: opacity 0.5s ease;
+}
+html[data-eyecare="4"] [data-eyecare-zone="main"] > .ec-active {
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(120, 140, 255, 0.16);
+  border-radius: 6px;
+}
+
+/* =====================================================================
+ * 等级 5：重度 — 聚焦 + 正文暖色微调（仅文字，图片视频保持原色）
+ * ===================================================================== */
+html[data-eyecare="5"] [data-eyecare-zone="main"] p,
+html[data-eyecare="5"] [data-eyecare-zone="main"] li,
+html[data-eyecare="5"] [data-eyecare-zone="main"] blockquote {
+  line-height: 1.9 !important;
+  letter-spacing: 0.02em !important;
+  -webkit-text-stroke: 0.36px rgba(0, 0, 0, 0.38);
+}
+html[data-eyecare="5"] [data-eyecare-zone="main"] > * {
+  opacity: 0.55;
+  transition: opacity 0.5s ease;
+}
+html[data-eyecare="5"] [data-eyecare-zone="main"] > .ec-active {
+  opacity: 1;
+  box-shadow: 0 0 0 5px rgba(120, 140, 255, 0.18);
+  border-radius: 6px;
+}
+/* 暖色偏移：仅正文文字区域；a/img/video 保持原色 */
+html[data-eyecare="5"] [data-eyecare-zone="main"] p,
+html[data-eyecare="5"] [data-eyecare-zone="main"] li,
+html[data-eyecare="5"] [data-eyecare-zone="main"] h1,
+html[data-eyecare="5"] [data-eyecare-zone="main"] h2,
+html[data-eyecare="5"] [data-eyecare-zone="main"] h3,
+html[data-eyecare="5"] [data-eyecare-zone="main"] h4,
+html[data-eyecare="5"] [data-eyecare-zone="main"] blockquote {
+  color: #43382d !important;
+}
+
+/* ---------- 暗色模式下：文字更亮、描边用浅色（提升对比度） ---------- */
+@media (prefers-color-scheme: dark) {
+  html[data-eyecare="3"] [data-eyecare-zone="main"] p,
+  html[data-eyecare="3"] [data-eyecare-zone="main"] li,
+  html[data-eyecare="3"] [data-eyecare-zone="main"] blockquote {
+    -webkit-text-stroke: 0.18px rgba(255, 255, 255, 0.35);
+  }
+  html[data-eyecare="3"] [data-eyecare-zone="main"] h1,
+  html[data-eyecare="3"] [data-eyecare-zone="main"] h2,
+  html[data-eyecare="3"] [data-eyecare-zone="main"] h3,
+  html[data-eyecare="3"] [data-eyecare-zone="main"] h4 {
+    -webkit-text-stroke: 0.3px rgba(255, 255, 255, 0.4);
+  }
+  html[data-eyecare="4"] [data-eyecare-zone="main"] p,
+  html[data-eyecare="4"] [data-eyecare-zone="main"] li,
+  html[data-eyecare="4"] [data-eyecare-zone="main"] blockquote {
+    -webkit-text-stroke: 0.3px rgba(255, 255, 255, 0.4);
+  }
+  html[data-eyecare="5"] [data-eyecare-zone="main"] p,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] li,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] blockquote {
+    -webkit-text-stroke: 0.36px rgba(255, 255, 255, 0.45);
+  }
+  html[data-eyecare="5"] [data-eyecare-zone="main"] p,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] li,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] h1,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] h2,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] h3,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] h4,
+  html[data-eyecare="5"] [data-eyecare-zone="main"] blockquote {
+    color: #ece0cc !important;
+  }
+}
+
+/* =====================================================================
+ * 内容类型感知
+ * ===================================================================== */
+/* 代码页：优先增大行高与字符间距 */
+html[data-eyecare-type="code"] [data-eyecare-zone="main"] pre,
+html[data-eyecare-type="code"] [data-eyecare-zone="main"] code {
+  line-height: 1.7 !important;
+  letter-spacing: 0.02em !important;
+}
+/* 长文章：优先加宽栏宽与段落间距 */
+html[data-eyecare-type="article"] [data-eyecare-zone="main"] {
+  max-width: 78ch !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+html[data-eyecare-type="article"] [data-eyecare-zone="main"] p {
+  margin-bottom: 1.4em !important;
+}
+/* 数据表格：增强斑马纹对比度 */
+html[data-eyecare-type="table"] [data-eyecare-zone="main"] tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-eyecare-type="table"] [data-eyecare-zone="main"] tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.06) !important;
+  }
+}
+
+/* ---------- 护眼提示浮层（等级 4+ 时显示在页面右下角） ---------- */
+.ec-tip {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483647;
+  max-width: 260px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: rgba(28, 32, 48, 0.92);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+}
+.ec-tip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
