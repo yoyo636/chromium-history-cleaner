@@ -231,6 +231,7 @@
     ['perf', '性能透视', '标签资源管理'],
     ['audio', '音频管理', '智能静音'],
     ['privacy', '隐私防护', '指纹加固'],
+    ['browserpilot', 'AI 操控', '网页 AI 操作浏览器'],
     ['settings', '偏好设置', '主题与范围'],
   ];
   let moreOpen = false;
@@ -317,6 +318,7 @@
         ['perf', '性能透视', '标签资源、冻结关闭'],
         ['audio', '音频管理', '识别内容、智能静音'],
         ['privacy', '隐私防护', '指纹监控、一键加固'],
+        ['browserpilot', 'AI 操控', '让 AI 操作浏览器'],
         ['settings', '偏好设置', '主题、默认范围'],
       ];
       const shortcuts = HC.el('div', { class: 'shortcut-grid' });

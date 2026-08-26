@@ -305,6 +305,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       chrome.storage.local.set({ privacyEvents: [] }, () => reply(true, true));
       return true;
 
+    /* ------------------------- BrowserPilot（网页端 AI 操作浏览器） ------------------------- */
+    case 'EXECUTE_TOOL':
+      handleBrowserPilot(payload, reply, _sender);
+      return true;
+
+    case 'BP_INJECT_PROTOCOL':
+      bpInjectProtocolToActiveAiTab(reply);
+      return true;
+
+    case 'BP_GET_CONTEXT':
+      reply(true, {
+        targetTabId: bpCtx.targetTabId,
+        lastNonAiTabId: bpCtx.lastNonAiTabId,
+      });
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -569,3 +585,357 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
     }
   });
 });
+
+/* =========================================================================
+ * BrowserPilot — 网页端 AI 操作浏览器
+ * 让 Kimi / DeepSeek / MiniMax 等网页 AI 通过 <tool_call> 结构化指令，
+ * 在本扩展的代理下安全控制「用户当前操作的网页」。
+ * 设计要点：
+ *   - 所有目标页操作都通过 chrome.scripting.executeScript(func+args) 完成，
+ *     绝不执行任意用户传入的 JavaScript（无 browser_execute 工具）。
+ *   - 上下文锁定：记住「最近交互的非 AI 标签页」，连续指令默认落在该页。
+ *   - 安全拦截：click/type 命中支付/密码/发送/删除等敏感词时，先弹系统通知
+ *     + 页面内确认弹窗，用户点「确认执行」才真正执行。
+ * ========================================================================= */
+
+const bpCtx = { targetTabId: null, lastNonAiTabId: null };
+const BP_AI_HOSTS = /kimi\.moonshot\.cn|chat\.deepseek\.com|chat\.minimaxi\.com/;
+function bpIsAiTab(url) {
+  return BP_AI_HOSTS.test(url || '');
+}
+function getTabSafe(id) {
+  return new Promise((resolve) => {
+    if (id == null) return resolve(null);
+    chrome.tabs.get(id, (t) => resolve(chrome.runtime.lastError ? null : t));
+  });
+}
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// 目标页选择优先级：args.tabId > bpCtx.targetTabId > 最近非AI页 > 当前非AI活跃页
+async function bpPickTarget(args, senderTabId) {
+  if (args && args.tabId) return args.tabId;
+  if (bpCtx.targetTabId) {
+    const t = await getTabSafe(bpCtx.targetTabId);
+    if (t && !bpIsAiTab(t.url)) return bpCtx.targetTabId;
+  }
+  if (bpCtx.lastNonAiTabId) {
+    const t = await getTabSafe(bpCtx.lastNonAiTabId);
+    if (t && !bpIsAiTab(t.url)) return bpCtx.lastNonAiTabId;
+  }
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active && !bpIsAiTab(active.url)) return active.id;
+  return null;
+}
+
+// 在目标页注入执行某函数（func + args），返回 results[0].result
+async function bpInject(tabId, func, args) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func,
+    args: [args],
+  });
+  return results && results[0] ? results[0].result : null;
+}
+
+// 等待标签页加载完成（最多 15s）
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    const onUpd = (id, info) => {
+      if (id === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onUpd);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(onUpd);
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpd);
+      resolve();
+    }, 15000);
+  });
+}
+
+// 敏感词判定：支付/密码/发送/删除
+const BP_SENSITIVE_RE = /支付|付款|提交订单|立即购买|下单|结算|发送|删除|确认支付|确认删除|pay|submit|send|delete|buy now|place order/i;
+function bpIsSensitive(info) {
+  if (!info || !info.found) return false;
+  if (info.isPassword) return true;
+  return BP_SENSITIVE_RE.test(info.text || '');
+}
+
+/* -------------------------------------------------------------------------
+ * bp_exec — 注入目标页执行的实际函数（必须自包含，仅用 document/window）
+ * 通过 args.mode = 'probe' | 'act' 区分「探测（敏感判定用）」与「执行」。
+ * 返回统一结构：{ success, data, error, current_url }
+ * ------------------------------------------------------------------------- */
+function bp_exec(args) {
+  const { tool, mode } = args;
+  const a = Object.assign({}, args);
+  delete a.tool;
+  delete a.mode;
+
+  function locate(x) {
+    let el = null;
+    if (x.selector) el = document.querySelector(x.selector);
+    else if (x.xpath) el = document.evaluate(x.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    else if (x.coords) el = document.elementFromPoint(x.coords.x, x.coords.y);
+    else if (x.text || x.containsText) {
+      const needle = x.text || x.containsText;
+      const exact = !!x.text;
+      const sels = ['a', 'button', '[role="button"]', 'input[type="button"]', 'input[type="submit"]', 'label', 'summary', 'div', 'span', 'p'];
+      for (const s of sels) {
+        const nodes = document.querySelectorAll(s);
+        for (const n of nodes) {
+          const t = (n.innerText || n.textContent || '').trim();
+          if (!t) continue;
+          if (exact ? t === needle : t.includes(needle)) { el = n; break; }
+        }
+        if (el) break;
+      }
+    }
+    return el;
+  }
+  function sleepP(ms) { return new Promise((r) => setTimeout(r, ms)); }
+  function setNativeValue(el, value) {
+    const proto = Object.getPrototypeOf(el);
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function pressEnter(el) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    }
+  }
+  function probeInfo(el) {
+    if (!el) return { found: false };
+    const tag = el.tagName.toLowerCase();
+    const text = (el.innerText || el.textContent || el.value || '').trim().slice(0, 120);
+    const typeAttr = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
+    const isPassword = tag === 'input' && (typeAttr === 'password' || (el.name && /pass/i.test(el.name)));
+    const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    return {
+      found: true, tagName: tag, text,
+      type: el.type || typeAttr, isPassword,
+      value: (tag === 'input' || tag === 'textarea') ? el.value : undefined,
+      rect: r ? { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } : undefined,
+    };
+  }
+
+  async function run() {
+    switch (tool) {
+      case 'browser_click': {
+        const el = locate(a);
+        if (mode === 'probe') return Object.assign({ success: true, current_url: location.href }, probeInfo(el));
+        if (!el) return { success: false, error: '未找到可点击元素，建议先用 browser_get_elements 重新探测', current_url: location.href };
+        try { el.scrollIntoView({ block: 'center' }); } catch (_) {}
+        await sleepP(150);
+        try { el.click(); }
+        catch (e) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); }
+        return { success: true, data: { clicked: el.tagName.toLowerCase(), text: (el.innerText || '').slice(0, 80) }, current_url: location.href };
+      }
+      case 'browser_type': {
+        const el = locate(a);
+        if (mode === 'probe') return Object.assign({ success: true, current_url: location.href }, probeInfo(el));
+        if (!el) return { success: false, error: '未找到输入元素', current_url: location.href };
+        const value = a.value != null ? String(a.value) : '';
+        if (a.clear) { setNativeValue(el, ''); await sleepP(150); }
+        let cur = a.clear ? '' : (el.value || '');
+        const interval = a.typeInterval || 50;
+        for (const ch of value) { cur += ch; setNativeValue(el, cur); await sleepP(interval + Math.random() * interval); }
+        if (a.pressEnter) pressEnter(el);
+        if (a.submit && el.form) { if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit(); }
+        return { success: true, data: { value: cur, length: cur.length }, current_url: location.href };
+      }
+      case 'browser_scroll': {
+        if (a.to === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: a.behavior || 'smooth' });
+        else if (a.to === 'top') window.scrollTo({ top: 0, behavior: a.behavior || 'smooth' });
+        else {
+          const amt = a.amount || 500;
+          const dx = a.direction === 'left' ? -amt : a.direction === 'right' ? amt : 0;
+          const dy = a.direction === 'up' ? -amt : a.direction === 'down' ? amt : 0;
+          window.scrollBy({ top: dy, left: dx, behavior: a.behavior || 'smooth' });
+        }
+        return { success: true, data: { scrollY: window.scrollY, direction: a.direction || a.to }, current_url: location.href };
+      }
+      case 'browser_read': {
+        let node = document.body;
+        if (a.selector) node = document.querySelector(a.selector);
+        else if (a.xpath) node = document.evaluate(a.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        if (!node) return { success: false, error: '未找到读取目标', current_url: location.href };
+        let content = a.format === 'html' ? node.innerHTML : (node.innerText || node.textContent || '');
+        const max = a.maxLength || 4000;
+        if (content.length > max) content = content.slice(0, max) + '...(已截断)';
+        return { success: true, data: { format: a.format || 'text', length: content.length, content }, current_url: location.href };
+      }
+      case 'browser_get_elements': {
+        const nodes = document.querySelectorAll(a.selector || 'a,button,[role="button"],input');
+        const limit = a.limit || 20;
+        const out = [];
+        for (let i = 0; i < Math.min(nodes.length, limit); i++) {
+          const n = nodes[i];
+          const r = n.getBoundingClientRect ? n.getBoundingClientRect() : null;
+          out.push({
+            index: i, tag: n.tagName.toLowerCase(),
+            text: (n.innerText || n.textContent || '').trim().slice(0, 60),
+            id: n.id || '', classes: n.className && n.className.toString ? n.className.toString().slice(0, 80) : '',
+            type: n.type || '', href: n.href || '',
+            rect: a.includeRect && r ? { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } : undefined,
+          });
+        }
+        return { success: true, data: { count: out.length, total: nodes.length, elements: out }, current_url: location.href };
+      }
+      case 'browser_wait': {
+        if (a.time) { await sleepP(a.time); return { success: true, data: { waited: a.time }, current_url: location.href }; }
+        if (a.selector || a.xpath) {
+          const timeout = a.timeout || 8000;
+          const start = Date.now();
+          while (Date.now() - start < timeout) {
+            const el = a.selector ? document.querySelector(a.selector)
+              : document.evaluate(a.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (el) return { success: true, data: { found: true, waited: Date.now() - start }, current_url: location.href };
+            await sleepP(200);
+          }
+          return { success: false, error: '等待元素超时', current_url: location.href };
+        }
+        await sleepP(a.networkIdle ? 3000 : 1000);
+        return { success: true, data: { networkIdle: !!a.networkIdle }, current_url: location.href };
+      }
+      case 'browser_keypress': {
+        const active = document.activeElement || document.body;
+        const mods = a.modifiers || [];
+        const codeMap = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39 };
+        const code = codeMap[a.keys] || (a.keys ? a.keys.charCodeAt(0) : 0);
+        const opts = {
+          key: a.keys, code: a.keys, keyCode: code, which: code, bubbles: true, cancelable: true,
+          ctrlKey: mods.includes('Control'), metaKey: mods.includes('Meta'),
+          shiftKey: mods.includes('Shift'), altKey: mods.includes('Alt'),
+        };
+        for (const type of ['keydown', 'keypress', 'keyup']) active.dispatchEvent(new KeyboardEvent(type, opts));
+        return { success: true, data: { keys: a.keys, modifiers: mods }, current_url: location.href };
+      }
+      default:
+        return { success: false, error: '未知工具: ' + tool, current_url: location.href };
+    }
+  }
+  return run().catch((e) => ({ success: false, error: '执行异常: ' + (e && e.message || e), current_url: location.href }));
+}
+
+/* -------------------------------------------------------------------------
+ * bpShowConfirm — 注入目标页的「敏感操作确认弹窗」，返回 Promise<boolean>
+ * ------------------------------------------------------------------------- */
+function bpShowConfirm(message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;color:#222;padding:20px 24px;border-radius:12px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
+    const p = document.createElement('div');
+    p.textContent = message;
+    p.style.cssText = 'margin-bottom:16px;font-size:15px;line-height:1.5;white-space:pre-wrap;';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
+    const cancel = document.createElement('button');
+    cancel.textContent = '取消';
+    cancel.style.cssText = 'padding:8px 16px;border:1px solid #ccc;background:#f5f5f5;border-radius:8px;cursor:pointer';
+    const ok = document.createElement('button');
+    ok.textContent = '确认执行';
+    ok.style.cssText = 'padding:8px 16px;border:none;background:#e53935;color:#fff;border-radius:8px;cursor:pointer';
+    const cleanup = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+    cancel.onclick = () => { cleanup(); resolve(false); };
+    ok.onclick = () => { cleanup(); resolve(true); };
+    wrap.appendChild(cancel); wrap.appendChild(ok);
+    box.appendChild(p); box.appendChild(wrap);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  });
+}
+
+/* -------------------------------------------------------------------------
+ * 导航 / 截图（background 直接处理，不走注入）
+ * ------------------------------------------------------------------------- */
+async function bpNavigate(args, senderTabId) {
+  let target = await bpPickTarget(args, senderTabId);
+  if (!target || bpIsAiTab((await getTabSafe(target))?.url)) {
+    const t = await chrome.tabs.create({ url: args.url });
+    target = t.id;
+  } else {
+    await chrome.tabs.update(target, { url: args.url });
+  }
+  await waitForTabLoad(target);
+  bpCtx.targetTabId = target;
+  const tab = await getTabSafe(target);
+  return { success: true, data: { navigated: true, url: args.url }, current_url: tab ? tab.url : args.url };
+}
+
+async function bpScreenshot(args, senderTabId) {
+  const target = bpCtx.targetTabId || (await bpPickTarget(args, senderTabId));
+  if (!target) return { success: false, error: '没有可截图的目标页', current_url: '' };
+  await chrome.tabs.update(target, { active: true });
+  await sleep(400);
+  const tab = await getTabSafe(target);
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  await chrome.tabs.update(senderTabId, { active: true });
+  return { success: true, data: { screenshot: dataUrl, note: '仅捕获可见区域（MV3 限制，非整页长图）' }, current_url: tab ? tab.url : '' };
+}
+
+/* -------------------------------------------------------------------------
+ * 主入口：分发 BrowserPilot 工具调用
+ * ------------------------------------------------------------------------- */
+async function handleBrowserPilot(payload, reply, sender) {
+  const { tool, args = {} } = payload || {};
+  const senderTabId = sender && sender.tab ? sender.tab.id : null;
+  try {
+    if (tool === 'browser_navigate') return reply(true, await bpNavigate(args, senderTabId));
+    if (tool === 'browser_screenshot') return reply(true, await bpScreenshot(args, senderTabId));
+
+    const target = await bpPickTarget(args, senderTabId);
+    if (!target) {
+      return reply(true, { success: false, error: '未找到目标标签页：请先打开想操作的网页，或先用 browser_navigate 打开。', current_url: '' });
+    }
+    bpCtx.targetTabId = target; // 锁定上下文
+
+    // 敏感拦截（仅 click / type）
+    if (tool === 'browser_click' || tool === 'browser_type') {
+      const info = await bpInject(target, bp_exec, { tool, mode: 'probe', ...args });
+      if (info && info.success && info.found && bpIsSensitive(info)) {
+        try {
+          chrome.notifications.create({
+            type: 'basic', title: 'BrowserPilot 敏感操作待确认',
+            message: '检测到：' + (info.text || info.tagName) + '。请在页面弹窗中点击「确认执行」。',
+          });
+        } catch (_) {}
+        const confirmed = await bpInject(target, bpShowConfirm,
+          'BrowserPilot 检测到敏感操作：\n「' + (info.text || info.tagName) + '」\n涉及支付 / 密码 / 发送 / 删除等，确认执行？');
+        if (!confirmed) {
+          return reply(true, { success: false, error: '用户取消了敏感操作', current_url: info.current_url || '' });
+        }
+      }
+    }
+
+    const result = await bpInject(target, bp_exec, { tool, mode: 'act', ...args });
+    reply(true, result);
+  } catch (e) {
+    reply(false, null, e && e.message ? e.message : String(e));
+  }
+}
+
+/* 弹窗触发：把协议文档注入到当前活跃的 AI 对话页 */
+function bpInjectProtocolToActiveAiTab(reply) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const t = tabs[0];
+    if (!t || !bpIsAiTab(t.url)) {
+      reply(false, null, '请先打开 Kimi / DeepSeek / MiniMax 的对话页面，再点此按钮');
+      return;
+    }
+    chrome.tabs.sendMessage(t.id, { type: 'BP_INJECT_PROTOCOL' }, (resp) => {
+      if (chrome.runtime.lastError) {
+        reply(false, null, '无法注入（请刷新 AI 页面后重试）：' + chrome.runtime.lastError.message);
+        return;
+      }
+      reply(true, resp && resp.ok ? resp.data : { injected: true });
+    });
+  });
+}

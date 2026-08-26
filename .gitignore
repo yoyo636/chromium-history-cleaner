@@ -1,0 +1,10 @@
+# 构建产物与缓存（不进仓库）
+__pycache__/
+*.pyc
+dist-firefox/
+dist-chromium/
+.tmp/
+node_modules/
+
+# 打包输出（在仓库上级 dist-packages/，也不进本仓库）
+*.zip
