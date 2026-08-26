@@ -81,7 +81,7 @@
               text: '取消记忆',
               title: '下次不再自动静音该域名',
               onclick: () => {
-                HC.callBackground('AUDIO_SET_MUTED', { tabId: t.id, muted: t.muted, learn: true, domain: t.domain })
+                HC.callBackground('AUDIO_SET_MUTED', { tabId: t.id, muted: t.muted, forget: true, domain: t.domain })
                   .then(() => { HC.toast('已取消记忆', 'success'); load(); })
                   .catch((e) => HC.toast(e.message, 'error'));
               },

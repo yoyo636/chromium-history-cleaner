@@ -148,27 +148,127 @@
       const mask = document.getElementById('modalMask');
       const t = document.getElementById('modalTitle');
       const b = document.getElementById('modalBody');
+      const input = document.getElementById('modalInput');
       const ok = document.getElementById('modalOk');
       const cancel = document.getElementById('modalCancel');
       t.textContent = title || '确认操作';
       b.innerHTML = body || '';
+      input.style.display = 'none';
       ok.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
       mask.hidden = false;
       const done = (val) => {
         mask.hidden = true;
         ok.removeEventListener('click', onOk);
         cancel.removeEventListener('click', onCancel);
+        input.removeEventListener('keydown', onKey);
         resolve(val);
       };
       const onOk = () => done(true);
       const onCancel = () => done(false);
+      const onKey = (e) => {
+        if (e.key === 'Enter') onOk();
+      };
       ok.addEventListener('click', onOk);
       cancel.addEventListener('click', onCancel);
+      input.addEventListener('keydown', onKey);
     });
   };
 
-  /* ============================ 导航调度 ============================ */
+  /* ============================ 输入弹窗（替代被禁用的 window.prompt） ============================ */
+  HC.prompt = function ({ title, body, placeholder, value, okText }) {
+    return new Promise((resolve) => {
+      const mask = document.getElementById('modalMask');
+      const t = document.getElementById('modalTitle');
+      const b = document.getElementById('modalBody');
+      const input = document.getElementById('modalInput');
+      const ok = document.getElementById('modalOk');
+      const cancel = document.getElementById('modalCancel');
+      t.textContent = title || '请输入';
+      b.innerHTML = body || '';
+      input.style.display = '';
+      input.value = value || '';
+      input.placeholder = placeholder || '';
+      ok.className = 'btn btn-primary';
+      ok.textContent = okText || '确定';
+      cancel.textContent = '取消';
+      mask.hidden = false;
+      input.focus();
+      input.select();
+      const done = (val) => {
+        mask.hidden = true;
+        input.style.display = 'none';
+        ok.textContent = '确认';
+        cancel.textContent = '取消';
+        ok.removeEventListener('click', onOk);
+        cancel.removeEventListener('click', onCancel);
+        input.removeEventListener('keydown', onKey);
+        resolve(val);
+      };
+      const onOk = () => done(input.value.trim() || null);
+      const onCancel = () => done(null);
+      const onKey = (e) => {
+        if (e.key === 'Enter') done(input.value.trim() || null);
+        if (e.key === 'Escape') done(null);
+      };
+      ok.addEventListener('click', onOk);
+      cancel.addEventListener('click', onCancel);
+      input.addEventListener('keydown', onKey);
+    });
+  };
+
+  /* ============================ 导航调度（含「更多」面板） ============================ */
+  const MORE_VIEWS = [
+    ['stats', '数据统计', 'Top 域名 / 页面'],
+    ['sessions', '会话存档', '恢复关闭页面'],
+    ['fatigue', '护眼助手', '疲劳感知调整'],
+    ['perf', '性能透视', '标签资源管理'],
+    ['audio', '音频管理', '智能静音'],
+    ['privacy', '隐私防护', '指纹加固'],
+    ['settings', '偏好设置', '主题与范围'],
+  ];
+  let moreOpen = false;
+
+  function initMorePanel() {
+    const panel = document.getElementById('morePanel');
+    panel.innerHTML = '';
+    MORE_VIEWS.forEach(([v, t, d]) => {
+      panel.appendChild(
+        HC.el('button', {
+          class: 'more-item',
+          onclick: () => {
+            closeMore();
+            switchView(v);
+          },
+        }, [
+          HC.el('div', { class: 'more-item-title', text: t }),
+          HC.el('div', { class: 'more-item-desc', text: d }),
+        ])
+      );
+    });
+  }
+
+  function openMore() {
+    const panel = document.getElementById('morePanel');
+    panel.hidden = false;
+    moreOpen = true;
+    const btn = document.querySelector('.nav-item[data-view="more"]');
+    if (btn) btn.classList.add('active');
+  }
+  function closeMore() {
+    const panel = document.getElementById('morePanel');
+    panel.hidden = true;
+    moreOpen = false;
+    const btn = document.querySelector('.nav-item[data-view="more"]');
+    if (btn) btn.classList.remove('active');
+  }
+  function toggleMore() {
+    if (moreOpen) closeMore();
+    else openMore();
+  }
+
   function switchView(name) {
+    if (name === 'more') return toggleMore();
+    closeMore();
     const mod = HC.modules[name];
     const content = document.getElementById('content');
     content.innerHTML = '';
@@ -269,9 +369,17 @@
   document.addEventListener('DOMContentLoaded', () => {
     HC.getPrefs().then((prefs) => HC.applyTheme(prefs.theme));
     document.getElementById('brandSub').textContent = HC.detectBrowser();
+    initMorePanel();
     document.getElementById('nav').addEventListener('click', (e) => {
       const btn = e.target.closest('.nav-item');
       if (btn) switchView(btn.dataset.view);
+    });
+    // 点击面板外关闭「更多」
+    document.addEventListener('click', (e) => {
+      if (!moreOpen) return;
+      const inPanel = e.target.closest('#morePanel');
+      const inBtn = e.target.closest('.nav-item[data-view="more"]');
+      if (!inPanel && !inBtn) closeMore();
     });
     switchView('home');
   });

@@ -129,21 +129,35 @@
         });
       }
       function closeByDomain() {
-        const dom = window.prompt('输入要关闭的域名（如 github.com）：');
-        if (!dom) return;
-        const ids = filtered
-          .filter((t) => {
-            try {
-              return new URL(t.url).hostname.includes(dom.trim());
-            } catch {
-              return false;
-            }
-          })
-          .map((t) => t.id);
-        if (!ids.length) return HC.toast('未找到匹配域名的标签', 'warn');
-        chrome.tabs.remove(ids, () => {
-          HC.toast(`已关闭 ${ids.length} 个标签`, 'success');
-          load();
+        // Chrome 扩展弹窗禁用 window.prompt，改用自定义输入弹窗
+        HC.prompt({
+          title: '按域名关闭标签',
+          body: '输入要关闭的域名（如 github.com）：',
+          placeholder: 'example.com',
+          okText: '关闭',
+        }).then((dom) => {
+          if (!dom) return;
+          const ids = filtered
+            .filter((t) => {
+              try {
+                return new URL(t.url).hostname.includes(dom.trim());
+              } catch {
+                return false;
+              }
+            })
+            .map((t) => t.id);
+          if (!ids.length) return HC.toast('未找到匹配域名的标签', 'warn');
+          HC.confirm({
+            title: '确认关闭？',
+            body: `将关闭 <b>${ids.length}</b> 个域名包含「${HC.escapeHtml(dom)}」的标签。`,
+            danger: true,
+          }).then((ok) => {
+            if (!ok) return;
+            chrome.tabs.remove(ids, () => {
+              HC.toast(`已关闭 ${ids.length} 个标签`, 'success');
+              load();
+            });
+          });
         });
       }
       async function copyUrls() {
@@ -159,7 +173,13 @@
       async function saveSession() {
         const sel = filtered.filter((t) => t._sel);
         const items = (sel.length ? sel : filtered).map((t) => ({ url: t.url, title: t.title }));
-        const name = window.prompt('给这个会话起个名字：', '会话 ' + new Date().toLocaleString());
+        if (!items.length) return HC.toast('没有可存档的标签', 'warn');
+        const name = await HC.prompt({
+          title: '存档会话',
+          body: `将把 <b>${items.length}</b> 个标签存为会话。给这个会话起个名字：`,
+          value: '会话 ' + new Date().toLocaleString(),
+          okText: '存档',
+        });
         if (!name) return;
         const store = await HC.getSessions();
         store.push({ id: Date.now() + '', name, time: Date.now(), tabs: items });

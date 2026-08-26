@@ -109,7 +109,7 @@
             HC.el('div', { class: 'clean-body' }, [
               HC.el('div', { class: 'clean-head' }, [
                 HC.el('span', { class: 'clean-name', title: t.title, text: HC.truncate(t.title || '(无标题)', 40) }),
-                HC.el('span', { class: 'tag', text: t.audible ? '🔊 发声' : '' }),
+                t.audible ? HC.el('span', { class: 'tag', text: '🔊 发声' }) : null,
               ]),
               HC.el('div', { class: 'clean-detail', text: sub }),
               HC.el('div', { class: 'clean-detail', text: '可能原因：' + attrib }),

@@ -253,8 +253,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case 'AUDIO_SET_MUTED':
       chrome.tabs.update(payload.tabId, { muted: payload.muted }, (t) => {
         if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
-        // 学习：用户手动静音/恢复某域名
-        if (payload.learn && payload.domain) {
+        if (payload.forget && payload.domain) {
+          // 取消学习记忆（不改变静音状态）
+          chrome.storage.local.get({ audioLearned: {} }, (r) => {
+            const m = r.audioLearned || {};
+            delete m[payload.domain];
+            chrome.storage.local.set({ audioLearned: m });
+          });
+        } else if (payload.learn && payload.domain) {
+          // 学习：用户手动静音/恢复某域名
           chrome.storage.local.get({ audioLearned: {} }, (r) => {
             const m = r.audioLearned || {};
             m[payload.domain] = payload.muted ? 'mute' : 'keep';
