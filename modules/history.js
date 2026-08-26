@@ -1,21 +1,30 @@
 /* -------------------------------------------------------------------------
  * modules/history.js — 历史记录：查询 / 预览 / 过滤 / 删除 / 导出
- * 危险操作统一走 background.js（SEARCH / DELETE_RANGE / DELETE_URL）。
+ * - 支持「全部时间」：startTime=0 起查询，不再限制近 N 天
+ * - 走后台 SEARCH_ALL（时间窗二分），突破单次 100 条上限，可拿全量数据
+ * - 大量数据时分页渲染（每页 500 条 + 加载更多），删除/导出作用于全量
+ * 危险操作统一走 background.js（SEARCH_ALL / DELETE_RANGE / DELETE_URL）。
  * ------------------------------------------------------------------------- */
 
 'use strict';
 
 (function () {
   const HC = window.HC;
-  let cache = []; // 当前时间段查询到的全部记录（上限约 100）
-  let filtered = []; // 经关键词过滤后的记录
-  let range = null; // [start, end] 时间戳
+  const PAGE_SIZE = 500;
+
+  let cache = []; // 全量记录（含 _sel 标记）
+  let filtered = []; // 经关键词过滤后的全量记录
+  let shown = 0; // 当前已渲染条数
+  let range = null; // [start, end] 时间戳；null 表示未查询
+  let busy = false;
 
   function parseDate(v) {
+    if (!v) return null;
     const d = new Date(v + 'T00:00:00');
     return isNaN(d) ? null : d.getTime();
   }
   function fmtDate(ts) {
+    if (!ts) return '';
     const d = new Date(ts);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -37,6 +46,7 @@
       today: [startOf(0), endOf()],
       '7': [startOf(6), endOf()],
       '30': [startOf(29), endOf()],
+      all: [0, Date.now()], // 全部时间：从最早到当前
     };
   }
 
@@ -51,6 +61,7 @@
         presetBtn('今天', 'today'),
         presetBtn('最近7天', '7'),
         presetBtn('最近30天', '30'),
+        presetBtn('全部时间', 'all'),
       ]);
 
       const filter = HC.el('input', {
@@ -62,7 +73,9 @@
       const total = HC.el('div', { class: 'total' });
       const list = HC.el('div', { class: 'list' });
 
-      root.appendChild(HC.el('div', { class: 'row glass' }, [presetWrap, startI, HC.el('span', { class: 'dash', text: '→' }), endI, searchBtn]));
+      root.appendChild(
+        HC.el('div', { class: 'row nowrap glass' }, [presetWrap, startI, HC.el('span', { class: 'dash', text: '→' }), endI, searchBtn])
+      );
       root.appendChild(HC.el('div', { class: 'row glass' }, [filter]));
       root.appendChild(toolbar);
       root.appendChild(total);
@@ -73,31 +86,59 @@
         return HC.el('button', {
           class: 'chip',
           text: label,
-          onclick: () => {
+          onclick: (e) => {
             const p = presets()[key];
             range = p;
-            startI.value = fmtDate(p[0]);
-            endI.value = fmtDate(p[1]);
+            if (key === 'all') {
+              startI.value = '';
+              endI.value = '';
+            } else {
+              startI.value = fmtDate(p[0]);
+              endI.value = fmtDate(p[1]);
+            }
+            presetWrap.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+            e.currentTarget.classList.add('active');
             runSearch();
           },
         });
       }
 
       function runSearch() {
-        const s = parseDate(startI.value);
-        const e = parseDate(endI.value);
-        if (s == null || e == null) return HC.toast('请选择有效的起止日期', 'warn');
+        if (busy) return;
+        // 空值处理：起始为空 → 0（最早）；结束为空 → 现在
+        let s = parseDate(startI.value);
+        let e = parseDate(endI.value);
+        if (s == null) s = 0;
+        if (e == null) e = Date.now();
+        if (e <= s) return HC.toast('结束日期需晚于开始日期', 'warn');
         range = [s, e];
-        HC.callBackground('SEARCH', { startTime: s, endTime: e, maxResults: 100 })
+        busy = true;
+        searchBtn.disabled = true;
+        list.innerHTML = '';
+        list.appendChild(HC.el('div', { class: 'empty', text: '正在查询全部历史（数据量大时稍候）…' }));
+        toolbar.innerHTML = '';
+        total.textContent = '';
+
+        HC.callBackground('SEARCH_ALL', { startTime: s, endTime: e })
           .then((items) => {
-            cache = items.map((x) => ({ ...x, _sel: false }));
-            applyFilter();
-            HC.toast(`找到 ${items.length} 条（预览上限 100）`);
+            cache = (items || []).map((x) => ({ ...x, _sel: false }));
+            busy = false;
+            searchBtn.disabled = false;
+            shown = 0;
+            applyFilter(true);
+            HC.toast(`找到 ${cache.length} 条记录`);
           })
-          .catch((err) => HC.toast('查询失败：' + err.message, 'error'));
+          .catch((err) => {
+            busy = false;
+            searchBtn.disabled = false;
+            list.innerHTML = '';
+            list.appendChild(HC.el('div', { class: 'empty', text: '查询失败：' + err.message }));
+            HC.toast('查询失败：' + err.message, 'error');
+          });
       }
 
-      function applyFilter() {
+      function applyFilter(resetShown) {
+        if (resetShown) shown = 0;
         const q = (filter.value || '').trim().toLowerCase();
         filtered = cache.filter(
           (x) =>
@@ -106,9 +147,10 @@
             (x.url || '').toLowerCase().includes(q)
         );
         renderList();
-        total.textContent = `时间段内共 ${cache.length} 条，当前显示 ${filtered.length} 条`;
+        const scope = range && range[0] === 0 ? '全部时间' : `${fmtDate(range[0])} ~ ${fmtDate(range[1])}`;
+        total.textContent = `时间范围：${scope} ｜ 共 ${cache.length} 条，当前显示 ${filtered.length} 条`;
       }
-      filter.addEventListener('input', applyFilter);
+      filter.addEventListener('input', () => applyFilter(true));
 
       function renderList() {
         toolbar.innerHTML = '';
@@ -139,7 +181,8 @@
           list.appendChild(HC.el('div', { class: 'empty', text: '没有记录' }));
           return;
         }
-        filtered.forEach((x) => {
+        const vis = filtered.slice(0, shown);
+        vis.forEach((x) => {
           const item = HC.el('label', { class: 'item' + (x._sel ? ' sel' : '') }, [
             (() => {
               const c = HC.el('input', { type: 'checkbox' });
@@ -151,20 +194,34 @@
               return c;
             })(),
             HC.el('div', { class: 'item-main' }, [
-              HC.el('div', { class: 'item-title', text: x.title || x.url || '(无标题)' }),
+              HC.el('div', { class: 'item-title', title: x.title || x.url || '(无标题)', text: x.title || x.url || '(无标题)' }),
               HC.el('a', {
                 class: 'item-url',
                 href: x.url,
                 title: x.url,
                 target: '_blank',
                 rel: 'noopener',
-                text: HC.truncate(x.url, 96),
+                text: HC.truncate(x.url, 120),
               }),
             ]),
             HC.el('span', { class: 'item-time', text: HC.formatTime(x.lastVisitTime) }),
           ]);
           list.appendChild(item);
         });
+
+        // 分页：加载更多
+        if (filtered.length > shown) {
+          list.appendChild(
+            HC.el('button', {
+              class: 'btn load-more',
+              text: `加载更多（还有 ${filtered.length - shown} 条）`,
+              onclick: () => {
+                shown += PAGE_SIZE;
+                renderList();
+              },
+            })
+          );
+        }
       }
 
       function delSelected() {
@@ -176,6 +233,7 @@
           danger: true,
         }).then((ok) => {
           if (!ok) return;
+          HC.toast('正在删除…', 'info');
           Promise.all(sel.map((x) => HC.callBackground('DELETE_URL', { url: x.url })))
             .then(() => {
               HC.toast(`已删除 ${sel.length} 条`, 'success');
@@ -187,12 +245,14 @@
 
       function delAll() {
         if (!range) return HC.toast('请先查询时间段', 'warn');
+        const scope = range[0] === 0 ? '全部时间' : `${fmtDate(range[0])} 到 ${fmtDate(range[1])}`;
         HC.confirm({
           title: '删除该时间段全部历史？',
-          body: `将永久删除从 <b>${fmtDate(range[0])}</b> 到 <b>${fmtDate(range[1])}</b> 的<b>全部</b>历史记录，<b>不可恢复</b>。`,
+          body: `将永久删除 <b>${scope}</b> 范围内的<b>全部</b>历史记录，<b>不可恢复</b>。`,
           danger: true,
         }).then((ok) => {
           if (!ok) return;
+          HC.toast('正在删除…', 'info');
           HC.callBackground('DELETE_RANGE', { startTime: range[0], endTime: range[1] })
             .then(() => {
               HC.toast('已删除该时间段全部历史', 'success');
@@ -218,7 +278,7 @@
             2
           );
           mime = 'application/json';
-          name = 'history.json';
+          name = 'history_' + (range ? `${fmtDate(range[0])}_${fmtDate(range[1])}` : 'all') + '.json';
         } else {
           const head = '﻿标题,网址,最后访问,访问次数\r\n';
           const rows = data
@@ -229,20 +289,32 @@
             .join('\r\n');
           content = head + rows + '\r\n';
           mime = 'text/csv';
-          name = 'history.csv';
+          name = 'history_' + (range ? `${fmtDate(range[0])}_${fmtDate(range[1])}` : 'all') + '.csv';
         }
+        HC.toast(`正在导出 ${data.length} 条…`, 'info');
         const url = 'data:' + mime + ';charset=utf-8,' + encodeURIComponent(content);
         chrome.downloads.download({ url, filename: name, saveAs: true }, () =>
           HC.toast('已导出 ' + name)
         );
       }
 
-      // 默认查询最近 7 天
-      const p7 = presets()['7'];
-      range = p7;
-      startI.value = fmtDate(p7[0]);
-      endI.value = fmtDate(p7[1]);
-      runSearch();
+      // 默认按用户设置的历史范围查询（默认最近 7 天）
+      HC.getPrefs().then((prefs) => {
+        const key = presets()[prefs.defRange] ? prefs.defRange : '7';
+        const p = presets()[key];
+        range = p;
+        if (key === 'all') {
+          startI.value = '';
+          endI.value = '';
+        } else {
+          startI.value = fmtDate(p[0]);
+          endI.value = fmtDate(p[1]);
+        }
+        presetWrap.querySelectorAll('.chip').forEach((c) => {
+          if (c.textContent === (key === 'all' ? '全部时间' : (key === 'today' ? '今天' : '最近' + key + '天'))) c.classList.add('active');
+        });
+        runSearch();
+      });
     },
   };
 })();

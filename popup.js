@@ -103,6 +103,33 @@
     return new Promise((res) => chrome.storage.local.set({ sessions: s }, res));
   };
 
+  /* ============================ 偏好设置（storage） ============================ */
+  HC.DEFAULT_PREFS = { theme: 'system', defRange: '7', cleanupConfirm: true };
+  HC.getPrefs = function () {
+    return new Promise((res) =>
+      chrome.storage.local.get({ hcPrefs: HC.DEFAULT_PREFS }, (r) =>
+        res(Object.assign({}, HC.DEFAULT_PREFS, r.hcPrefs || {}))
+      )
+    );
+  };
+  HC.setPrefs = function (p) {
+    return new Promise((res) => chrome.storage.local.set({ hcPrefs: p }, res));
+  };
+
+  /* ============================ 主题切换 ============================ */
+  /**
+   * 主题策略：
+   * - 'system' → 不设类，由 CSS 的 prefers-color-scheme 决定
+   * - 'light'  → 加 html.light，强制亮色
+   * - 'dark'   → 加 html.dark，强制暗色
+   */
+  HC.applyTheme = function (pref) {
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    if (pref === 'light') root.classList.add('light');
+    else if (pref === 'dark') root.classList.add('dark');
+  };
+
   /* ============================ Toast ============================ */
   HC.toast = function (msg, type) {
     const wrap = document.getElementById('toastWrap');
@@ -176,8 +203,10 @@
         ['tabs', '标签管理', '批量关闭、去重、存档'],
         ['bookmarks', '书签工具', '去重、死链、导出'],
         ['downloads', '下载管理', '查看、打开、清理'],
-        ['cleanup', '数据清理', '一键清理缓存痕迹'],
+        ['cleanup', '数据清理', '扫描详情、一键清理'],
         ['sessions', '会话存档', '恢复关闭的页面'],
+        ['stats', '数据统计', 'Top 域名与访问分析'],
+        ['settings', '偏好设置', '主题、默认范围'],
       ];
       const shortcuts = HC.el('div', { class: 'shortcut-grid' });
       defs.forEach(([v, t, d]) =>
@@ -223,17 +252,18 @@
           (i) => i.startTime && new Date(i.startTime).getTime() > cut
         ).length;
       });
-      HC.callBackground('SEARCH', {
+      HC.callBackground('SEARCH_STATS', {
         startTime: Date.now() - 7 * 86400000,
         endTime: Date.now(),
       })
-        .then((list) => (vHis.textContent = list.length))
+        .then((s) => (vHis.textContent = s ? s.count : 0))
         .catch(() => (vHis.textContent = '—'));
     },
   };
 
   /* ============================ 启动 ============================ */
   document.addEventListener('DOMContentLoaded', () => {
+    HC.getPrefs().then((prefs) => HC.applyTheme(prefs.theme));
     document.getElementById('brandSub').textContent = HC.detectBrowser();
     document.getElementById('nav').addEventListener('click', (e) => {
       const btn = e.target.closest('.nav-item');
