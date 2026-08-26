@@ -19,6 +19,9 @@
 | 💾 会话 | 恢复「最近关闭」的标签与窗口；查看 / 恢复 / 删除自己存档的会话 |
 | 📊 统计 | 历史访问分析：总记录数 / 总访问次数 / 时间跨度 / 活跃域名数；**Top 10 域名与页面条形图**（支持 7 / 30 / 90 天与全部时间） |
 | 👁️ 护眼 | **视觉疲劳自适应**：鼠标 / 滚动 / 键盘 / 连续时长四维信号实时评估疲劳等级 1-5；**30 秒渐进**调整行高、字距、字重、对比度（提升非降低）；**区域级**调整（仅主阅读区，导航/侧边栏不动）；**内容类型感知**（代码 / 长文章 / 表格不同策略）；等级 4+ 开启**聚焦阅读**（高亮当前段落，其余淡化）；等级 5 正文**暖色微调**（图片视频保持原色）；图标角标实时显示等级，弹窗内提供**当日疲劳曲线与休息建议** |
+| ⚡ 性能 | **标签页性能透视**：基于 longtask / performance.memory / 帧率实时评估每个标签的 CPU 繁忙度、内存与渲染压力，绿/黄/红指示灯；按消耗排序；**一键冻结**（`tabs.discard` 释放内存）或关闭；**归因分析**（定位高频执行脚本）；持续高负载自动**预警通知** |
+| 🔊 音频 | **音频内容识别与静音**：列出全部发声标签，一键静音/恢复/全部静音；**规则判定**（自动播放元素 + 广告容器）；**频谱分类**（Web Audio 分析人声 / 背景音乐 / 高频广告噪声，保留人声）；**跨站学习**（你静音过的域名自动静音记忆） |
+| 🛡️ 隐私 | **无痕追踪防护**：MAIN 世界 hook canvas / WebGL 指纹调用，如实报告「哪个站点、哪个指纹 API、是否无痕、调用次数」；**一键加固**（随机化 canvas/WebGL 指纹）；**跨站追踪图谱**（同一域名被多次读取指纹 → 追踪网络候选）；风险分级清单 |
 | ⚙️ 设置 | 主题（跟随系统 / 亮 / 暗）、历史默认范围（今天 / 7 天 / 30 天 / 全部时间）、清理二次确认开关（持久化） |
 
 **安全机制**：删除类操作均二次确认 + 不可恢复警示；清理前可先导出备份；所有写操作的权限最小化。
@@ -34,7 +37,10 @@
 | 样式方案 | 纯 CSS + CSS 变量；`backdrop-filter` 液态玻璃；`prefers-color-scheme` 自适应 + 手动主题覆盖 |
 | 弹窗尺寸 | 640px 宽，单行不换行（nowrap + 省略号），导航横向滚动 |
 | 后台逻辑 | **Service Worker**（`background.js`）：集中代理历史查询 / **全量查询** / 统计 / 删除、书签死链探测、**疲劳上报汇总与角标** |
-| 内容脚本 | **`content.js` + `content.css`**：全站注入，采集鼠标 / 滚动 / 键盘信号，渐进式护眼排版调整（主阅读区识别、内容类型感知、聚焦阅读、暖色微调） |
+| 内容脚本 | **`content.js`**：护眼信号采集与排版调整；**`content_perf.js`**：性能指标（longtask/内存/帧率）与音频频谱分析；**`content_privacy.js`**（MAIN 世界）：canvas/WebGL 指纹监控与随机化 |
+| 性能 API | `PerformanceObserver(longtask)` + `performance.memory` + 帧率；`chrome.tabs.discard`（冻结）/ `remove` / `muted` |
+| 音频 API | `chrome.tabs.query({audible})` / `update({muted})`；`chrome.tabCapture.getMediaStreamId` + Web Audio `AnalyserNode` 频谱分类 |
+| 隐私 API | `world: "MAIN"` 内容脚本 hook `canvas` / `webgl`；`chrome.scripting` / `storage` |
 | 历史 API | `chrome.history.search`（时间窗二分取全量）/ `deleteRange` / `deleteUrl` |
 | 标签 API | `chrome.tabs.query` / `remove` / `reload` / `create` |
 | 书签 API | `chrome.bookmarks.getTree` / `remove` |
@@ -43,7 +49,7 @@
 | 会话 API | `chrome.sessions.getRecentlyClosed` / `restore`；自定义会话存于 `chrome.storage.local` |
 | 偏好存储 | `chrome.storage.local`（`hcPrefs`） |
 | 导出下载 | `chrome.downloads.download`（以 `data:` URL 内联，不落临时文件） |
-| 权限声明 | `history` `storage` `downloads` `tabs` `bookmarks` `browsingData` `sessions` + `host_permissions`（`http/https`，供护眼内容脚本注入）— 最小化原则 |
+| 权限声明 | `history` `storage` `downloads` `tabs` `bookmarks` `browsingData` `sessions` `tabCapture` `scripting` `notifications` + `host_permissions`（`http/https`）— 最小化原则 |
 | 资源打包 | 全部本地化，**不引入任何外部 CDN** |
 | 图标生成 | 纯标准库 Python（`zlib` / `struct`）脚本 `generate_icons.py`，无需 Pillow |
 
@@ -57,9 +63,11 @@ history-cleaner/
 ├── popup.html             # 主界面（顶部导航栏 + 内容区）
 ├── popup.css              # 液态玻璃样式（640px 宽、亮/暗自适应、统计/清理明细组件）
 ├── popup.js               # 核心：命名空间、工具、导航、概览、偏好与主题
-├── background.js          # Service Worker：历史代理（含全量查询/统计）+ 死链探测 + 疲劳汇总/角标
+├── background.js          # Service Worker：历史代理（含全量查询/统计）+ 死链探测 + 疲劳汇总/角标 + 性能/音频/隐私处理
 ├── content.js             # 护眼内容脚本：信号采集、疲劳评分、渐进排版调整、上报
 ├── content.css            # 护眼调整规则（等级 1-5 / 主阅读区 / 内容类型 / 聚焦 / 暖色）
+├── content_perf.js        # 性能透视：longtask/内存/帧率上报 + 音频频谱分类分析
+├── content_privacy.js     # 隐私防护（MAIN 世界）：canvas/WebGL 指纹监控与随机化加固
 ├── modules/
 │   ├── history.js         # 历史查询（全量）/ 预览 / 过滤 / 删除 / 导出
 │   ├── tabs.js            # 标签管理
@@ -69,6 +77,9 @@ history-cleaner/
 │   ├── sessions.js        # 会话存档
 │   ├── stats.js           # 数据统计（Top 域名 / 页面）
 │   ├── fatigue.js         # 护眼仪表盘（疲劳曲线 / 等级 / 休息建议 / 开关）
+│   ├── perf.js            # 标签页性能透视（指示灯 / 冻结 / 关闭 / 归因）
+│   ├── audio.js           # 音频管理（发声标签 / 频谱分类 / 域名学习静音）
+│   ├── privacy.js         # 隐私报告（指纹事件 / 一键加固 / 追踪图谱）
 │   └── settings.js        # 偏好设置（主题 / 默认范围 / 清理确认）
 ├── icons/                 # 16 / 32 / 48 / 128 PNG
 ├── generate_icons.py      # 纯标准库图标生成脚本（开发用，可选）

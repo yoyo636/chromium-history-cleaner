@@ -719,6 +719,33 @@ body {
   flex-shrink: 0;
 }
 
+/* ---------- 性能指示灯 ---------- */
+.perf-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  flex: 0 0 auto;
+}
+.perf-dot.green {
+  background: #2c9d6b;
+}
+.perf-dot.yellow {
+  background: #d69a12;
+}
+.perf-dot.red {
+  background: #e5484d;
+}
+.perf-dot.na {
+  background: rgba(120, 130, 160, 0.55);
+}
+
 /* ---------- 确认弹窗 ---------- */
 .modal-mask {
   position: fixed;

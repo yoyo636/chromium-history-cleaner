@@ -207,6 +207,9 @@
         ['sessions', '会话存档', '恢复关闭的页面'],
         ['stats', '数据统计', 'Top 域名与访问分析'],
         ['fatigue', '护眼助手', '疲劳感知、阅读调整'],
+        ['perf', '性能透视', '标签资源、冻结关闭'],
+        ['audio', '音频管理', '识别内容、智能静音'],
+        ['privacy', '隐私防护', '指纹监控、一键加固'],
         ['settings', '偏好设置', '主题、默认范围'],
       ];
       const shortcuts = HC.el('div', { class: 'shortcut-grid' });

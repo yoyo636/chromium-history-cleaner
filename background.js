@@ -202,6 +202,102 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       chrome.storage.local.get({ eyecare: null }, (r) => reply(true, r.eyecare || null));
       return true;
 
+    /* ------------------------- 标签页性能透视 ------------------------- */
+    case 'PERFORM_REPORT':
+      if (_sender && _sender.tab) {
+        handlePerfReport(_sender.tab, payload);
+      }
+      reply(true, true);
+      return false;
+
+    case 'TABS_PERF':
+      chrome.tabs.query({}, (tabs) => {
+        chrome.storage.local.get({ perfTabs: {} }, (r) => {
+          const map = r.perfTabs || {};
+          reply(true, tabs.map((t) => ({
+            id: t.id,
+            title: t.title || t.url || '(无标题)',
+            url: t.url || '',
+            audible: !!t.audible,
+            mutedInfo: t.mutedInfo || {},
+            favIconUrl: t.favIconUrl || '',
+            perf: map[t.id] || null,
+          })));
+        });
+      });
+      return true;
+
+    case 'TAB_ACTION':
+      doTabAction(payload, reply);
+      return true;
+
+    /* ------------------------- 音频管理 ------------------------- */
+    case 'AUDIO_LIST':
+      chrome.tabs.query({}, (tabs) => {
+        chrome.storage.local.get({ audioLearned: {} }, (r) => {
+          const learned = r.audioLearned || {};
+          reply(true, tabs
+            .filter((t) => t.audible)
+            .map((t) => ({
+              id: t.id,
+              title: t.title || t.url || '',
+              url: t.url || '',
+              muted: !!(t.mutedInfo && t.mutedInfo.muted),
+              domain: domainOf(t.url),
+              learned: learned[domainOf(t.url)] || 'keep',
+            })));
+        });
+      });
+      return true;
+
+    case 'AUDIO_SET_MUTED':
+      chrome.tabs.update(payload.tabId, { muted: payload.muted }, (t) => {
+        if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+        // 学习：用户手动静音/恢复某域名
+        if (payload.learn && payload.domain) {
+          chrome.storage.local.get({ audioLearned: {} }, (r) => {
+            const m = r.audioLearned || {};
+            m[payload.domain] = payload.muted ? 'mute' : 'keep';
+            chrome.storage.local.set({ audioLearned: m });
+          });
+        }
+        reply(true, true);
+      });
+      return true;
+
+    case 'AUDIO_MUTE_ALL':
+      chrome.tabs.query({ audible: true }, (tabs) => {
+        const ids = (tabs || []).map((t) => t.id).filter((x) => x != null);
+        if (!ids.length) return reply(true, 0);
+        let done = 0;
+        ids.forEach((id) => chrome.tabs.update(id, { muted: true }, () => done++));
+        reply(true, ids.length);
+      });
+      return true;
+
+    case 'AUDIO_ANALYZE':
+      analyzeTabAudio(payload.tabId, reply);
+      return true;
+
+    case 'PRIVACY_EVENT':
+      handlePrivacyEvent(_sender, payload);
+      reply(true, true);
+      return false;
+
+    case 'PRIVACY_GET':
+      chrome.storage.local.get({ privacyEvents: [], privacyMode: 'monitor' }, (r) => {
+        reply(true, { events: r.privacyEvents || [], mode: r.privacyMode || 'monitor' });
+      });
+      return true;
+
+    case 'PRIVACY_SET_MODE':
+      chrome.storage.local.set({ privacyMode: payload.mode }, () => reply(true, true));
+      return true;
+
+    case 'PRIVACY_CLEAR':
+      chrome.storage.local.set({ privacyEvents: [] }, () => reply(true, true));
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -308,3 +404,161 @@ function updateFatigueBadge(level) {
     /* 忽略角标异常 */
   }
 }
+
+
+/* -------------------------------------------------------------------------
+ * 标签页性能透视
+ * ------------------------------------------------------------------------- */
+function domainOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (_e) {
+    return '';
+  }
+}
+
+function handlePerfReport(tab, payload) {
+  const now = Date.now();
+  chrome.storage.local.get({ perfTabs: {} }, (r) => {
+    const map = r.perfTabs || {};
+    const prev = map[tab.id] || { highStreak: 0, lastNotify: 0 };
+    map[tab.id] = {
+      busy: payload.busy || 0,
+      longTasks: payload.longTasks || 0,
+      heap: payload.heap || 0,
+      fps: payload.fps || 60,
+      attrib: payload.attrib || [],
+      media: payload.media || { autoplay: 0, adContainers: 0 },
+      url: tab.url || '',
+      title: tab.title || '',
+      ts: now,
+      highStreak: payload.busy >= 75 ? (prev.highStreak || 0) + 1 : 0,
+      lastNotify: prev.lastNotify || 0,
+    };
+    chrome.storage.local.set({ perfTabs: map });
+
+    // 高负载预警（替代「风扇预警」：系统无温度/风扇 API）
+    const p = map[tab.id];
+    if (p.highStreak >= 3 && now - (p.lastNotify || 0) > 10 * 60000) {
+      p.lastNotify = now;
+      map[tab.id] = p;
+      chrome.storage.local.set({ perfTabs: map });
+      try {
+        chrome.notifications.create('perf-alert-' + tab.id, {
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: '⚠️ 标签页高负载持续',
+          message: '「' + (tab.title || '未知页面').slice(0, 30) + '」已持续高占用，可能导致设备发热。点击查看或关闭该标签。',
+          priority: 2,
+        });
+      } catch (_e) {
+        /* 忽略 */
+      }
+    }
+  });
+}
+
+function doTabAction(payload, reply) {
+  const id = payload.tabId;
+  if (id == null) return reply(false, null, '缺少 tabId');
+  if (payload.action === 'discard') {
+    chrome.tabs.discard(id, () => {
+      if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+      reply(true, true);
+    });
+  } else if (payload.action === 'close') {
+    chrome.tabs.remove(id, () => {
+      if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+      reply(true, true);
+    });
+  } else if (payload.action === 'mute') {
+    chrome.tabs.update(id, { muted: true }, () => {
+      if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+      reply(true, true);
+    });
+  } else if (payload.action === 'unmute') {
+    chrome.tabs.update(id, { muted: false }, () => {
+      if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+      reply(true, true);
+    });
+  } else if (payload.action === 'focus') {
+    chrome.tabs.update(id, { active: true }, () => reply(true, true));
+  } else {
+    reply(false, null, '未知操作');
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * 音频：频谱分类分析（用户触发，需授权）
+ * ------------------------------------------------------------------------- */
+function analyzeTabAudio(tabId, reply) {
+  if (tabId == null) return reply(false, null, '缺少 tabId');
+  try {
+    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
+      if (chrome.runtime.lastError)
+        return reply(false, null, '无法获取音频流：' + chrome.runtime.lastError.message);
+      chrome.tabs.sendMessage(tabId, { type: 'AUDIO_ANALYZE', streamId }, (resp) => {
+        if (chrome.runtime.lastError)
+          return reply(false, null, '标签页未就绪，请刷新页面后重试（' + chrome.runtime.lastError.message + '）');
+        if (resp && resp.ok) return reply(true, resp.data);
+        reply(false, null, (resp && resp.error) || '分析失败');
+      });
+    });
+  } catch (e) {
+    reply(false, null, 'tabCapture 不可用：' + e.message);
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * 隐私事件：记录指纹调用（含无痕标记）
+ * ------------------------------------------------------------------------- */
+function handlePrivacyEvent(sender, payload) {
+  const incognito = !!(sender && sender.tab && sender.tab.incognito);
+  chrome.storage.local.get({ privacyEvents: [] }, (r) => {
+    const events = r.privacyEvents || [];
+    const key = payload.host + '|' + payload.api;
+    const found = events.find((e) => e.key === key);
+    if (found) {
+      found.count = (found.count || 1) + 1;
+      found.lastTs = Date.now();
+    } else {
+      events.push({
+        key: key,
+        host: payload.host,
+        api: payload.api,
+        count: 1,
+        incognito: incognito,
+        firstTs: Date.now(),
+        lastTs: Date.now(),
+      });
+    }
+    if (events.length > 500) events.splice(0, events.length - 500);
+    chrome.storage.local.set({ privacyEvents: events });
+  });
+}
+
+/* -------------------------------------------------------------------------
+ * 自动静音学习：用户静音某域名后，该域名再次发声自动静音
+ * ------------------------------------------------------------------------- */
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!info.audible || !tab.audible) return;
+  const dom = domainOf(tab.url || '');
+  if (!dom) return;
+  chrome.storage.local.get({ audioLearned: {} }, (r) => {
+    const learned = r.audioLearned || {};
+    if (learned[dom] === 'mute' && !(tab.mutedInfo && tab.mutedInfo.muted)) {
+      chrome.tabs.update(tabId, { muted: true }, () => {
+        try {
+          chrome.notifications.create('audio-mute-' + tabId, {
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: '🔇 已自动静音（学习记忆）',
+            message: dom + ' 你之前选择静音，本次自动静音。可在「音频」页恢复或取消记忆。',
+          });
+        } catch (_e) {
+          /* 忽略 */
+        }
+      });
+    }
+  });
+});
