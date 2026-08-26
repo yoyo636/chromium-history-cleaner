@@ -74,7 +74,7 @@
       const list = HC.el('div', { class: 'list' });
 
       root.appendChild(
-        HC.el('div', { class: 'row nowrap glass' }, [presetWrap, startI, HC.el('span', { class: 'dash', text: '→' }), endI, searchBtn])
+        HC.el('div', { class: 'row glass' }, [presetWrap, startI, HC.el('span', { class: 'dash', text: '→' }), endI, searchBtn])
       );
       root.appendChild(HC.el('div', { class: 'row glass' }, [filter]));
       root.appendChild(toolbar);
@@ -131,10 +131,19 @@
           .catch((err) => {
             busy = false;
             searchBtn.disabled = false;
-            list.innerHTML = '';
-            list.appendChild(HC.el('div', { class: 'empty', text: '查询失败：' + err.message }));
+            cache = [];
+            filtered = [];
+            shown = 0;
+            renderList(); // 保留工具栏（删除全部仍可用）
+            total.textContent = `时间范围：${scopeText()} ｜ 查询失败：${err.message}`;
+            list.appendChild(HC.el('div', { class: 'empty', text: '查询失败：' + err.message + '（可直接使用「删除全部」清理该时间段）' }));
             HC.toast('查询失败：' + err.message, 'error');
           });
+      }
+
+      function scopeText() {
+        if (!range) return '未设置';
+        return range[0] === 0 ? '全部时间' : `${fmtDate(range[0])} ~ ${fmtDate(range[1])}`;
       }
 
       function applyFilter(resetShown) {
@@ -205,6 +214,17 @@
               }),
             ]),
             HC.el('span', { class: 'item-time', text: HC.formatTime(x.lastVisitTime) }),
+            HC.el('span', { class: 'item-acts' }, [
+              HC.el('button', {
+                class: 'mini danger',
+                text: '删除',
+                onclick: (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  delOne(x);
+                },
+              }),
+            ]),
           ]);
           list.appendChild(item);
         });
@@ -222,6 +242,23 @@
             })
           );
         }
+      }
+
+      function delOne(x) {
+        HC.confirm({
+          title: '删除这条历史？',
+          body: `将永久删除 <b>${HC.escapeHtml(x.title || x.url || '(无标题)')}</b>，此操作<b>不可恢复</b>。`,
+          danger: true,
+        }).then((ok) => {
+          if (!ok) return;
+          HC.toast('正在删除…', 'info');
+          HC.callBackground('DELETE_URL', { url: x.url })
+            .then(() => {
+              HC.toast('已删除', 'success');
+              runSearch();
+            })
+            .catch((e) => HC.toast('删除失败：' + e.message, 'error'));
+        });
       }
 
       function delSelected() {
