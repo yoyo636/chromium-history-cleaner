@@ -74,27 +74,29 @@
 
 **English version**
 
-Browser Companion bundles 12 practical tools in one popup with a liquid-glass UI. One codebase works across Chrome, Edge, Opera, Tabbit, Firefox and other mainstream browsers.
+Browser Companion bundles 12 practical tools into a single lightweight popup with a liquid-glass UI. One codebase, built on Manifest V3, works across Chrome, Edge, Opera, Tabbit, Firefox and other Chromium-based browsers.
 
-Features:
-- 📜 History: query by time range (Today / 7d / 30d / All time) with full-data fetching, live filter, multi/single/range delete, export JSON/CSV.
-- 🗂️ Tabs: batch close, dedupe, close by domain, copy URLs, save sessions.
-- 🔖 Bookmarks: dedupe by URL, dead-link check, export JSON/HTML.
-- ⬇️ Downloads: view, open file/folder, erase records.
-- 🧹 Cleanup: scan real usage (real GB for downloads + largest files), one-click clear cache/cookies/history, auto re-scan to verify.
-- 💾 Sessions: restore recently closed tabs/windows, save custom sessions.
-- 📊 Stats: history analytics with Top domain/page charts.
-- 👁️ Eye care: fatigue level (1-5) from mouse/scroll/typing rhythm, 30-second progressive reading adjustments (line height, contrast, focus mode, warm tint), daily curve & rest reminders.
-- ⚡ Performance: per-tab CPU busy/memory/FPS view, freeze (discard) or close heavy tabs, high-load alerts.
-- 🔊 Audio: list audible tabs, spectrum classification (voice/music/ad), smart mute with domain learning.
-- 🛡️ Privacy: monitor Canvas/WebGL fingerprint calls, one-click shield (randomize), cross-site tracking map.
-- ⚙️ Settings: theme (system/light/dark), default time range, cleanup confirmation.
+What it does:
+
+- 📜 **History** — Query by time range (Today / 7 / 30 days / All time) with full-data fetching beyond the 100-item API limit, live keyword filtering, single / multi / range delete, and JSON / CSV export.
+- 🗂️ **Tabs** — Batch close, dedupe, close by domain, copy URLs, and save sessions.
+- 🔖 **Bookmarks** — Dedupe by URL, dead-link detection, export to JSON / HTML.
+- ⬇️ **Downloads** — View records, open files / reveal in folder, erase history entries.
+- 🧹 **Cleanup** — Scan real disk usage first (real GB for downloads plus the largest files), then one-click clear cache, cookies, history and more — with an automatic re-scan to verify results.
+- 💾 **Sessions** — Restore recently closed tabs / windows and manage custom saved sessions.
+- 📊 **Stats** — History analytics with Top-domain and Top-page bar charts (7 / 30 / 90 days or all time).
+- 👁️ **Eye care** — Continuously gauges a fatigue level (1–5) from your mouse, scrolling and typing rhythm, then smoothly adjusts reading comfort over 30 seconds (line height, contrast, focus mode, warm text tint). Includes a daily fatigue curve and rest reminders.
+- ⚡ **Performance** — Per-tab CPU busyness, heap memory and frame-rate at a glance; freeze (discard) or close heavy tabs with one click; alerts when a tab stays under sustained high load.
+- 🔊 **Audio** — Lists every audible tab, classifies audio via spectrum analysis (voice / music / ad), and lets you mute selectively with domain-level memory.
+- 🛡️ **Privacy** — Monitors Canvas / WebGL fingerprint calls, offers one-click fingerprint randomization, and surfaces a cross-site tracking map.
+- ⚙️ **Settings** — Theme (system / light / dark), default history range, and a cleanup-confirmation toggle.
 
 Privacy & security:
-- All data is processed locally in your browser; nothing is uploaded, shared or sold.
-- Destructive actions require confirmation with unrecoverable warnings.
-- Least-privilege permissions only.
-- Privacy policy: see the URL in the store listing.
+
+- All data stays on your device: nothing is uploaded, shared or sold.
+- Destructive actions always require confirmation, with clear unrecoverable warnings.
+- Permissions are kept to the strict minimum needed for the listed features.
+- Full privacy policy: see the link in the store listing.
 
 ---
 

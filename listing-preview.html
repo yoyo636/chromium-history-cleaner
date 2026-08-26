@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Listing 预览 · 浏览器搭子</title>
+<style>
+  :root { color-scheme: light; --line:#e3e8f2; --muted:#5b6472; }
+  @media (prefers-color-scheme: dark) {
+    :root { color-scheme: dark; }
+    body { background:#10131c; color:#e8eaf0; }
+    .card, .ss { background:#1a1f2e; border-color:#2c3348; }
+    .chip { background:#262e44; }
+    table th, table td { border-color:#2c3348; }
+    a { color:#8ab0ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:#f4f6fb; color:#1d2230; padding:32px 16px; line-height:1.6; }
+  .wrap { max-width: 900px; margin: 0 auto; display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:28px; box-shadow:0 10px 40px rgba(31,38,80,.08); }
+  .main { flex: 1 1 540px; }
+  .side { flex: 1 1 260px; }
+  .icon { width:96px; height:96px; border-radius:22px; box-shadow:0 6px 20px rgba(31,38,80,.18); }
+  .row { display:flex; gap:16px; align-items:center; }
+  h1 { font-size:22px; margin:0 0 2px; }
+  .dev { font-size:13px; color:var(--muted); }
+  .badges { margin:6px 0 14px; display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { background:#eef1f7; border-radius:999px; padding:3px 12px; font-size:12.5px; }
+  .short { font-size:15px; color:#333c4e; }
+  .sec { font-size:16px; font-weight:700; margin:22px 0 10px; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .ss { aspect-ratio: 16/10; background:#eef1f7; border:1px solid var(--line); border-radius:10px;
+    display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; text-align:center; padding:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; }
+  th { background:#f4f6fb; }
+  .note { font-size:12.5px; color:var(--muted); margin-top:14px; }
+  .btn { display:inline-block; background:#2c9d6b; color:#fff; border-radius:999px; padding:8px 18px; font-size:14px; }
+  code { background:#eef1f7; padding:1px 5px; border-radius:5px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card main">
+    <div class="row">
+      <img class="icon" src="icons/icon128.png" alt="icon">
+      <div>
+        <h1>浏览器搭子 · 历史与标签页管家</h1>
+        <div class="dev">Browser Companion · History &amp; Tab Manager — by yoyo636</div>
+        <div class="badges">
+          <span class="chip">工具</span><span class="chip">效率</span><span class="chip">4.1.0</span>
+          <span class="chip">1,000+ 用户占位</span><span class="chip">评分 ★★★★★ 占位</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="short">浏览器搭子：历史清理、标签管理、书签去重、下载管理、数据清理、会话存档、统计、护眼、性能与隐私工具 —— 一套代码兼容 Chrome / Edge / Opera / Tabbit / Firefox。</p>
+
+    <div class="sec">截图（提交前替换为真实截图）</div>
+    <div class="gallery">
+      <div class="ss">概览仪表盘<br>(1280×800)</div>
+      <div class="ss">历史·全部时间<br>删除 / 导出</div>
+      <div class="ss">清理·扫描详情<br>真实 GB 占用</div>
+      <div class="ss">统计·Top 域名</div>
+      <div class="ss">护眼·疲劳曲线</div>
+      <div class="ss">标签·批量操作</div>
+    </div>
+
+    <div class="sec">详细描述</div>
+    <p>浏览器搭子是一款集 12 大实用功能于一体的浏览器伴侣，液态玻璃界面，一套代码兼容 Chrome、Edge、Opera、Tabbit、Firefox 等主流浏览器。</p>
+    <ul>
+      <li><b>📜 历史</b>：按时间（今天 / 7 天 / 30 天 / 全部时间）查询预览，全量获取，实时过滤，多选 / 单条 / 按范围删除，导出 JSON/CSV。</li>
+      <li><b>🗂️ 标签</b>：批量关闭、去重、按域名关闭、复制网址、会话存档。</li>
+      <li><b>🔖 书签</b>：按网址去重、死链检测、导出 JSON/HTML。</li>
+      <li><b>⬇️ 下载</b>：查看、打开文件 / 文件夹、移除记录。</li>
+      <li><b>🧹 清理</b>：扫描真实占用（下载记录显示真实 GB 与最大文件），一键清理，清理后自动复扫验证。</li>
+      <li><b>💾 会话</b>：恢复最近关闭，自定义会话存档。</li>
+      <li><b>📊 统计</b>：历史访问分析，Top 域名与页面条形图。</li>
+      <li><b>👁️ 护眼</b>：感知疲劳等级 1-5，30 秒渐进调整阅读排版（行高 / 对比度 / 聚焦阅读 / 暖色），当日疲劳曲线与休息提醒。</li>
+      <li><b>⚡ 性能</b>：标签 CPU 繁忙度 / 内存 / 帧率透视，一键冻结或关闭高耗能标签。</li>
+      <li><b>🔊 音频</b>：识别发声标签，频谱分类（人声 / 音乐 / 广告），智能静音与域名记忆。</li>
+      <li><b>🛡️ 隐私</b>：监控 Canvas/WebGL 指纹调用，一键随机化加固，跨站追踪图谱。</li>
+      <li><b>⚙️ 设置</b>：主题（跟随系统 / 亮 / 暗）、默认时间范围、清理确认开关。</li>
+    </ul>
+    <p><b>隐私与安全：</b>所有数据在本地浏览器内处理，不上传、不共享、不出售；删除类操作均二次确认；权限最小化。</p>
+
+    <div class="sec">权限用途（粘贴到商店「权限用途」栏）</div>
+    <table>
+      <tr><th>权限</th><th>用途</th></tr>
+      <tr><td><code>history</code></td><td>历史模块的查询、删除与导出</td></tr>
+      <tr><td><code>tabs</code> / <code>sessions</code></td><td>标签管理与会话存档 / 恢复</td></tr>
+      <tr><td><code>bookmarks</code></td><td>书签去重、死链检测与导出</td></tr>
+      <tr><td><code>downloads</code></td><td>下载记录管理与文件导出</td></tr>
+      <tr><td><code>browsingData</code></td><td>经确认后清除浏览数据（缓存 / Cookie 等）</td></tr>
+      <tr><td><code>tabCapture</code></td><td>用户点击「分析」后识别当前标签音频内容</td></tr>
+      <tr><td><code>scripting</code> + 主机权限</td><td>隐私指纹监控 / 加固与护眼 / 性能内容脚本</td></tr>
+      <tr><td><code>notifications</code></td><td>高负载与自动静音提醒</td></tr>
+      <tr><td><code>storage</code></td><td>本地保存偏好、会话与统计数据</td></tr>
+    </table>
+  </div>
+
+  <div class="card side">
+    <div class="btn">添加至浏览器</div>
+    <div class="sec" style="margin-top:16px">商店信息（占位）</div>
+    <table>
+      <tr><th>项目</th><th>内容</th></tr>
+      <tr><td>版本</td><td>4.1.0</td></tr>
+      <tr><td>更新日期</td><td>2026-08-26</td></tr>
+      <tr><td>大小</td><td>约 100 KB</td></tr>
+      <tr><td>语言</td><td>中文 / English</td></tr>
+      <tr><td>隐私政策</td><td><a href="privacy.html">privacy.html</a></td></tr>
+      <tr><td>源码</td><td>GitHub 开源</td></tr>
+    </table>
+    <div class="note">单用途说明（Single purpose）建议：<br>
+    "This extension provides browser productivity tools — history / tab / session management, data cleanup, and optional eye-care, performance and privacy assistance. All processing is local."</div>
+  </div>
+</div>
+</body>
+</html>
