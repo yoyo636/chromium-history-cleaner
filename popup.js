@@ -15,6 +15,7 @@
     const map = [
       [/Edg\//, 'Microsoft Edge'],
       [/OPR\//, 'Opera'],
+      [/Firefox\//, 'Mozilla Firefox'],
       [/Brave\//, 'Brave'],
       [/Vivaldi\//, 'Vivaldi'],
       [/YaBrowser\//, 'Yandex'],
@@ -22,8 +23,14 @@
       [/HeadlessChrome/, 'Chromium'],
     ];
     for (const [re, name] of map) if (re.test(ua)) return name;
-    return 'Chromium 浏览器';
+    // Safari（桌面 Safari UA 伪装含 Chrome/ 时会被上方 Chrome 命中，属兼容行为）
+    if (/Safari\//.test(ua) && !/Chromium/.test(ua)) return 'Safari';
+    return '浏览器';
   };
+  // 运行时能力标记（供各模块做跨浏览器降级）
+  HC.isFirefox = /Firefox\//.test(navigator.userAgent);
+  HC.isSafari =
+    /Safari\//.test(navigator.userAgent) && !/Chromium|Chrome\//.test(navigator.userAgent);
 
   /* ============================ DOM 工具 ============================ */
   HC.el = function (tag, props, children) {

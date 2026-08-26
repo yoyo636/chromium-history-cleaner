@@ -59,7 +59,9 @@
 
 ```
 history-cleaner/
-├── manifest.json          # MV3 配置：权限、popup、service worker、content scripts、图标
+├── manifest.json          # MV3 配置（Chromium）：权限、popup、service worker、content scripts、图标
+├── manifest.firefox.json  # Firefox 版 manifest（background.scripts 事件页 + gecko 配置）
+├── build_firefox.py       # 打包 Firefox 版 zip（dist-firefox/）
 ├── popup.html             # 主界面（顶部导航栏 + 内容区）
 ├── popup.css              # 液态玻璃样式（640px 宽、亮/暗自适应、统计/清理明细组件）
 ├── popup.js               # 核心：命名空间、工具、导航、概览、偏好与主题
@@ -109,14 +111,28 @@ history-cleaner/
 
 通用步骤：扩展管理页 → 开启「**开发者模式**」→「**加载已解压的扩展程序**」→ 选择 `history-cleaner` 目录 → 点击工具栏图标打开弹窗。
 
-| 浏览器 | 扩展管理地址 |
-| --- | --- |
-| Google Chrome | `chrome://extensions` |
-| Microsoft Edge | `edge://extensions` |
-| Brave | `brave://extensions` |
-| Opera | `opera://extensions` |
-| Arc | `chrome://extensions` |
-| 360 极速浏览器 / Cent Browser | `chrome://extensions`（需先开开发者模式） |
+| 浏览器 | 扩展管理地址 | 兼容性 |
+| --- | --- | --- |
+| Google Chrome | `chrome://extensions` | ✅ 原生 |
+| Microsoft Edge | `edge://extensions` | ✅ 原生（可直接上架 Edge Add-ons） |
+| Opera / Brave / Arc / Vivaldi / Yandex | `chrome://extensions` 等 | ✅ 原生 |
+| Tabbit | `chrome://extensions` | ✅ 原生（Chromium 内核） |
+| 360 极速浏览器 / Cent Browser | `chrome://extensions`（需先开开发者模式） | ✅ 原生 |
+| **Firefox** | `about:debugging#/runtime/this-firefox` | ⚠️ 用打包版（见下） |
+
+### Firefox 适配说明
+
+Firefox（Gecko 内核）与 Chromium 有 API 差异，工程已做兼容：
+
+- **manifest 差异**：`manifest.firefox.json` 使用 `background.scripts`（事件页）替代 `service_worker`，并含 `browser_specific_settings.gecko`（要求 Firefox 126+）。
+- **能力降级（自动）**：
+  - 性能页「冻结」依赖 `chrome.tabs.discard`（Firefox 不支持）→ 自动隐藏；
+  - 内存显示依赖 `performance.memory`（Firefox 无）→ 显示「—」；
+  - 清理项过滤 `serviceWorkers` / `siteSettings`（Firefox `browsingData` 不支持）；
+  - 顶部品牌检测可正确识别「Mozilla Firefox」。
+- **打包**：运行 `python3 build_firefox.py`，生成 `dist-firefox/browser-companion-firefox.zip`（内含 Firefox 版 `manifest.json`），可直接在 `about:debugging` 临时加载，或提交 AMO。
+
+> Safari（WebKit）需 macOS + Xcode，用 Apple「Web Extension Converter」转换打包后上架 App Store；`browsingData` / `tabCapture` 支持较弱，暂未内置适配。
 
 **验证清单**：
 1. 顶部品牌胶囊显示当前浏览器名称；

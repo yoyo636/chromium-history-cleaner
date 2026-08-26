@@ -16,6 +16,7 @@
 (function () {
   const HC = window.HC;
 
+  // Firefox 的 browsingData 不支持 serviceWorkers / siteSettings，跨浏览器时过滤
   const TYPES = [
     { key: 'history', label: '浏览历史', scan: true },
     { key: 'downloads', label: '下载记录', scan: true },
@@ -26,7 +27,10 @@
     { key: 'passwords', label: '密码', scan: false },
     { key: 'siteSettings', label: '网站设置', scan: false },
     { key: 'serviceWorkers', label: 'Service Worker', scan: false },
-  ];
+  ].filter((t) => {
+    if (HC.isFirefox && (t.key === 'serviceWorkers' || t.key === 'siteSettings')) return false;
+    return true;
+  });
 
   const SCOPES = [
     ['hour', '最近 1 小时', 3600000],

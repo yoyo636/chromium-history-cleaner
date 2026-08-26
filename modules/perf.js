@@ -77,7 +77,9 @@
             : ['暂无归因']).join('；');
 
           const acts = HC.el('span', { class: 'item-acts' });
-          if (p && p.busy >= 40) {
+          // 冻结依赖 chrome.tabs.discard（Firefox 不支持时隐藏）
+          const canDiscard = typeof chrome.tabs.discard === 'function';
+          if (p && p.busy >= 40 && canDiscard) {
             acts.appendChild(HC.el('button', {
               class: 'mini danger',
               text: '冻结',
@@ -101,7 +103,7 @@
           }));
 
           const sub = p
-            ? `CPU 繁忙 ${p.busy}% · 内存 ${HC.formatBytes(p.heap)} · ${p.fps} FPS · 长任务 ${p.longTasks} 次/分${p.media && p.media.autoplay ? ' · ⏵自动播放×' + p.media.autoplay : ''}`
+            ? `CPU 繁忙 ${p.busy}% · 内存 ${p.heap ? HC.formatBytes(p.heap) : '—'} · ${p.fps} FPS · 长任务 ${p.longTasks} 次/分${p.media && p.media.autoplay ? ' · ⏵自动播放×' + p.media.autoplay : ''}`
             : '等待该标签首次上报（约 1 分钟内）';
 
           const row = HC.el('div', { class: 'clean-item' }, [
