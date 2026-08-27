@@ -123,6 +123,40 @@
     };
   }
 
+  /* ---------- 清洗 AI 可能输出的非标准 JSON ----------
+   * 大模型有时会生成单引号 JSON、中文引号、markdown 围栏、多余逗号或注释。
+   * 本函数尽量还原成标准 JSON；还原失败则返回原串供上层再次尝试。
+   */
+  function normalizeToolJson(raw) {
+    let s = String(raw || '').trim();
+    // 去掉 markdown 代码块围栏 ```json / ```
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    // 去掉行内注释 // 与 /* */
+    s = s.replace(/\/\/[^\n\r]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    // 中文引号 -> 英文
+    s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    // 去掉对象/数组末尾多余逗号
+    s = s.replace(/,(\s*[}\]])/g, '$1');
+    // 若首字符不是 { 或 [，尝试截取第一个 JSON 片段
+    const firstObj = s.indexOf('{');
+    const firstArr = s.indexOf('[');
+    let start = -1;
+    if (firstObj !== -1 && firstArr !== -1) start = Math.min(firstObj, firstArr);
+    else if (firstObj !== -1) start = firstObj;
+    else if (firstArr !== -1) start = firstArr;
+    if (start > 0) s = s.slice(start);
+    // 若全用单引号（AI 常见错误），把配对单引号改为双引号（假定字符串内不含嵌套单引号）
+    const singleCount = (s.match(/'/g) || []).length;
+    const doubleCount = (s.match(/"/g) || []).length;
+    if (singleCount > 0 && singleCount > doubleCount) {
+      // 只替换作为字符串边界的成对单引号：'value' -> "value"
+      s = s.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, function (_m, inner) {
+        return '"' + inner.replace(/"/g, '\\"') + '"';
+      });
+    }
+    return s;
+  }
+
   /* ---------- 捕获 AI 消息中的 <tool_call> ----------
    * 旧逻辑只扫 chat 容器的最后 5 个直接子元素，对 DeepSeek 等层级深的 DOM 失效。
    * 改为：优先找页面上包含 <tool_call> 的最小元素；找不到再回退到 body.innerText。
@@ -130,7 +164,6 @@
   const processed = new Set();
   function findToolCallSource() {
     const candidates = [];
-    // 用 querySelectorAll 比递归 walk 更稳定；只取可见文本元素，避免 script/style
     const all = document.querySelectorAll('body, body *');
     for (const el of all) {
       if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT') continue;
@@ -138,9 +171,21 @@
       if (text.includes('<tool_call>')) candidates.push({ el, text });
     }
     if (!candidates.length) return document.body ? (document.body.innerText || '') : '';
-    // 选文本长度最短的元素，通常是包裹 <tool_call> 的最内层节点，避免拿到 body 全文
     candidates.sort((a, b) => a.text.length - b.text.length);
     return candidates[0].text;
+  }
+  function stableFingerprint(tool, args) {
+    try { return tool + '::' + JSON.stringify(args); } catch (_) { return tool + '::' + String(args); }
+  }
+  function parseToolCall(inner) {
+    let s = inner.trim();
+    try { return JSON.parse(s); } catch (_) {}
+    const normalized = normalizeToolJson(s);
+    try { return JSON.parse(normalized); } catch (_) {}
+    // 最后一搏：把单引号统一替换为双引号（可能误伤，但兜底）
+    const fallback = normalized.replace(/'/g, '"');
+    try { return JSON.parse(fallback); } catch (_) {}
+    return null;
   }
   function detectToolCall() {
     const text = findToolCallSource();
@@ -148,12 +193,15 @@
     let m;
     while ((m = re.exec(text)) !== null) {
       const raw = m[0];
-      if (processed.has(raw)) continue;
-      processed.add(raw);
-      let parsed;
-      try { parsed = JSON.parse(m[1].trim()); }
-      catch (e) { console.warn('[BrowserPilot] 工具 JSON 解析失败:', e); continue; }
-      if (parsed && parsed.tool && parsed.args) executeTool(parsed.tool, parsed.args);
+      const parsed = parseToolCall(m[1]);
+      if (!parsed || !parsed.tool || typeof parsed.args !== 'object') {
+        console.warn('[BrowserPilot] 工具 JSON 解析失败，原始内容:', m[1].trim().slice(0, 200));
+        continue;
+      }
+      const fp = stableFingerprint(parsed.tool, parsed.args);
+      if (processed.has(fp)) continue;
+      processed.add(fp);
+      executeTool(parsed.tool, parsed.args);
     }
   }
 
