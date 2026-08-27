@@ -123,6 +123,10 @@
     };
   }
 
+  /* ---------- 调试开关 ---------- */
+  const DEBUG = true;
+  function bpLog(...args) { if (DEBUG) console.log('[BrowserPilot]', ...args); }
+
   /* ---------- 清洗 AI 可能输出的非标准 JSON ----------
    * 大模型有时会生成单引号 JSON、中文引号、markdown 围栏、多余逗号或注释。
    * 本函数尽量还原成标准 JSON；还原失败则返回原串供上层再次尝试。
@@ -149,7 +153,6 @@
     const singleCount = (s.match(/'/g) || []).length;
     const doubleCount = (s.match(/"/g) || []).length;
     if (singleCount > 0 && singleCount > doubleCount) {
-      // 只替换作为字符串边界的成对单引号：'value' -> "value"
       s = s.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, function (_m, inner) {
         return '"' + inner.replace(/"/g, '\\"') + '"';
       });
@@ -157,21 +160,44 @@
     return s;
   }
 
-  /* ---------- 捕获 AI 消息中的 <tool_call> ----------
-   * 旧逻辑只扫 chat 容器的最后 5 个直接子元素，对 DeepSeek 等层级深的 DOM 失效。
-   * 改为：优先找页面上包含 <tool_call> 的最小元素；找不到再回退到 body.innerText。
+  /* ---------- 递归扫描 DOM + Shadow DOM ----------
+   * 聊天内容常被放在 shadow root 里，普通 querySelectorAll 会漏掉。
    */
-  const processed = new Set();
-  function findToolCallSource() {
-    const candidates = [];
-    const all = document.querySelectorAll('body, body *');
-    for (const el of all) {
-      if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT') continue;
-      const text = (el.innerText || el.textContent || '');
-      if (text.includes('<tool_call>')) candidates.push({ el, text });
+  function collectAllNodes(root, out) {
+    if (!root) return out;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode()) !== null) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        out.push(node);
+        if (node.shadowRoot) collectAllNodes(node.shadowRoot, out);
+      } else {
+        out.push(node);
+      }
     }
-    if (!candidates.length) return document.body ? (document.body.innerText || '') : '';
-    candidates.sort((a, b) => a.text.length - b.text.length);
+    return out;
+  }
+  function findToolCallSource() {
+    const nodes = collectAllNodes(document.body, []);
+    const candidates = [];
+    for (const node of nodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = node.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue;
+        const text = (node.innerText || node.textContent || '');
+        if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
+      } else if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
+      }
+    }
+    if (!candidates.length) {
+      const fallback = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+      bpLog('未找到 <tool_call>，回退 body.innerText，长度=', fallback.length);
+      return fallback;
+    }
+    candidates.sort((a, b) => a.len - b.len);
+    bpLog('找到', candidates.length, '个候选，最短文本长度=', candidates[0].len);
     return candidates[0].text;
   }
   function stableFingerprint(tool, args) {
@@ -182,25 +208,26 @@
     try { return JSON.parse(s); } catch (_) {}
     const normalized = normalizeToolJson(s);
     try { return JSON.parse(normalized); } catch (_) {}
-    // 最后一搏：把单引号统一替换为双引号（可能误伤，但兜底）
     const fallback = normalized.replace(/'/g, '"');
     try { return JSON.parse(fallback); } catch (_) {}
     return null;
   }
   function detectToolCall() {
     const text = findToolCallSource();
+    if (!text.includes('<tool_call>')) return;
+    bpLog('开始检测 <tool_call>，文本长度=', text.length);
     const re = /<tool_call>([\s\S]*?)<\/tool_call>/g;
     let m;
     while ((m = re.exec(text)) !== null) {
-      const raw = m[0];
       const parsed = parseToolCall(m[1]);
-      if (!parsed || !parsed.tool || typeof parsed.args !== 'object') {
+      if (!parsed || !parsed.tool || typeof parsed.args !== 'object' || parsed.args === null) {
         console.warn('[BrowserPilot] 工具 JSON 解析失败，原始内容:', m[1].trim().slice(0, 200));
         continue;
       }
       const fp = stableFingerprint(parsed.tool, parsed.args);
-      if (processed.has(fp)) continue;
+      if (processed.has(fp)) { bpLog('已执行过，跳过', parsed.tool); continue; }
       processed.add(fp);
+      bpLog('执行工具', parsed.tool, parsed.args);
       executeTool(parsed.tool, parsed.args);
     }
   }
@@ -275,13 +302,36 @@
     return false;
   });
 
-  /* ---------- 启动 ---------- */
+  /* ---------- 在多个根节点上启动 MutationObserver ----------
+   * 聊天内容可能放在 shadow root 里，因此监听 body 和已存在的 shadow roots。
+   * 同时启动兜底轮询，防止 observer 遗漏或页面用虚拟 DOM 不触发 Mutation。
+   */
+  function observeRoot(root, obs) {
+    try {
+      obs.observe(root, { childList: true, subtree: true, characterData: true });
+      bpLog('监听 root:', root.nodeName || 'shadowRoot');
+    } catch (e) { bpLog('监听 root 失败', e); }
+  }
+  function collectShadowRoots() {
+    const roots = [];
+    collectAllNodes(document.body, []).forEach((n) => { if (n.nodeType === Node.ELEMENT_NODE && n.shadowRoot) roots.push(n.shadowRoot); });
+    return roots;
+  }
   function start() {
     buildFloatingPanel();
-    const target = adapter.getChat() || document.body;
-    const obs = new MutationObserver(throttle(detectToolCall, 500));
-    obs.observe(target, { childList: true, subtree: true, characterData: true });
-    window.BrowserPilot = { injectProtocol, getPlatform: () => PLATFORM };
+    const obs = new MutationObserver(throttle(detectToolCall, 300));
+    observeRoot(document.body, obs);
+    setTimeout(() => {
+      const roots = collectShadowRoots();
+      roots.forEach((r) => observeRoot(r, obs));
+    }, 1000);
+    // 兜底轮询：每 800ms 全页扫描一次，最多 40 次（32 秒），覆盖流式/虚拟 DOM 场景
+    let pollCount = 0;
+    const poll = setInterval(() => {
+      detectToolCall();
+      if (++pollCount >= 40) clearInterval(poll);
+    }, 800);
+    window.BrowserPilot = { injectProtocol, getPlatform: () => PLATFORM, detectNow: detectToolCall };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
