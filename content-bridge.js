@@ -123,21 +123,27 @@
     };
   }
 
-  /* ---------- 捕获最新 AI 消息中的 <tool_call> ---------- */
+  /* ---------- 捕获 AI 消息中的 <tool_call> ----------
+   * 旧逻辑只扫 chat 容器的最后 5 个直接子元素，对 DeepSeek 等层级深的 DOM 失效。
+   * 改为：优先找页面上包含 <tool_call> 的最小元素；找不到再回退到 body.innerText。
+   */
   const processed = new Set();
-  function getLatestText() {
-    const chat = adapter.getChat();
-    if (!chat) return '';
-    const kids = Array.from(chat.children).slice(-5);
-    let best = '';
-    for (const k of kids) {
-      const t = (k.innerText || k.textContent || '');
-      if (t.length > best.length) best = t;
+  function findToolCallSource() {
+    const candidates = [];
+    // 用 querySelectorAll 比递归 walk 更稳定；只取可见文本元素，避免 script/style
+    const all = document.querySelectorAll('body, body *');
+    for (const el of all) {
+      if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT') continue;
+      const text = (el.innerText || el.textContent || '');
+      if (text.includes('<tool_call>')) candidates.push({ el, text });
     }
-    return best || (chat.innerText || '');
+    if (!candidates.length) return document.body ? (document.body.innerText || '') : '';
+    // 选文本长度最短的元素，通常是包裹 <tool_call> 的最内层节点，避免拿到 body 全文
+    candidates.sort((a, b) => a.text.length - b.text.length);
+    return candidates[0].text;
   }
   function detectToolCall() {
-    const text = getLatestText();
+    const text = findToolCallSource();
     const re = /<tool_call>([\s\S]*?)<\/tool_call>/g;
     let m;
     while ((m = re.exec(text)) !== null) {
