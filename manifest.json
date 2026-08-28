@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "浏览器搭子 · 历史与标签页管家",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "description": "实用的跨浏览器搭子：历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档、数据统计、视觉疲劳自适应护眼、标签页性能透视、音频静音管理与无痕追踪防护。内置 BrowserPilot：让网页端 AI（Kimi / DeepSeek / MiniMax）通过结构化指令安全控制浏览器。兼容 Chromium 内核与 Firefox，液态玻璃界面。",
   "permissions": [
     "history",
@@ -22,21 +22,38 @@
   ],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "css": ["content.css"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content_perf.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content_perf.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content_privacy.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content_privacy.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
@@ -47,7 +64,9 @@
         "https://chat.deepseek.com/*",
         "https://chat.minimaxi.com/*"
       ],
-      "js": ["content-bridge.js"],
+      "js": [
+        "content-bridge.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -67,7 +86,9 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["browserpilot-protocol.md"],
+      "resources": [
+        "browserpilot-protocol.md"
+      ],
       "matches": [
         "https://kimi.moonshot.cn/*",
         "https://chat.deepseek.com/*",
