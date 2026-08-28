@@ -321,6 +321,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
       return true;
 
+    /* --------------------- 开发者模式 · 篡改（密码门禁在后台） --------------------- */
+    case 'TAMPER_SET_DEV':
+      handleTamperSetDev(payload, reply);
+      return true;
+
+    case 'TAMPER_LIST':
+      handleTamperList(payload, reply);
+      return true;
+
+    case 'TAMPER_OP':
+      handleTamperOp(payload, reply);
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -938,4 +951,170 @@ function bpInjectProtocolToActiveAiTab(reply) {
       reply(true, resp && resp.ok ? resp.data : { injected: true });
     });
   });
+}
+
+
+/* =========================================================================
+ * 开发者模式 · 篡改模块（Tamper）
+ * - 密码门禁：TAMPER_SET_DEV 校验密码后写 storage.local.devMode
+ * - 所有 TAMPER_LIST / TAMPER_OP 均先检查 devMode，绕过 UI 也调不动
+ * - 仅使用 Chrome 官方 API（history/bookmarks/downloads/cookies），不会损坏浏览器
+ * - 边界（Chrome API 硬约束）：
+ *     历史可「新增（时间为现在，可指定次数）」与「删除」，不能改已有条目的时间戳/次数
+ *     书签可完全增删改；下载记录可删除；Cookie 可改值/删除
+ * ========================================================================= */
+const TAMPER_PASS = '248635';
+
+function tamperReady() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ devMode: false }, (r) => resolve(!!r.devMode));
+  });
+}
+
+function handleTamperSetDev(payload, reply) {
+  const pass = String(payload.pass || '');
+  if (pass !== TAMPER_PASS) return reply(false, null, '密码错误');
+  chrome.storage.local.set({ devMode: !!payload.on }, () => reply(true, { devMode: !!payload.on }));
+}
+
+/* 列表：history / bookmarks / downloads / cookies */
+function handleTamperList(payload, reply) {
+  tamperReady().then((ok) => {
+    if (!ok) return reply(false, null, '未开启开发者模式');
+    const kind = payload.kind;
+    if (kind === 'history') {
+      chrome.history.search(
+        { text: payload.query || '', startTime: Date.now() - 90 * 864e5, endTime: Date.now(), maxResults: 500 },
+        (items) => {
+          if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+          reply(true, (items || []).map(normItem));
+        }
+      );
+      return;
+    }
+    if (kind === 'bookmarks') {
+      chrome.bookmarks.getTree((tree) => {
+        if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+        const out = [];
+        (function walk(nodes, path) {
+          (nodes || []).forEach((n) => {
+            if (n.url) out.push({ id: n.id, title: n.title, url: n.url, path });
+            if (n.children) walk(n.children, path + ' / ' + (n.title || 'root'));
+          });
+        })(tree, '');
+        reply(true, out);
+      });
+      return;
+    }
+    if (kind === 'downloads') {
+      chrome.downloads.search({ limit: 200, orderBy: ['-startTime'] }, (items) => {
+        if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+        reply(true, items || []);
+      });
+      return;
+    }
+    if (kind === 'cookies') {
+      chrome.cookies.getAll({}, (cookies) => {
+        if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
+        reply(
+          true,
+          (cookies || []).map((c) => ({
+            name: c.name, domain: c.domain, value: c.value,
+            path: c.path, secure: c.secure, storeId: c.storeId,
+          }))
+        );
+      });
+      return;
+    }
+    reply(false, null, '未知类别: ' + kind);
+  });
+}
+
+/* 操作：统一入口，op + args */
+async function handleTamperOp(payload, reply) {
+  if (!(await tamperReady())) return reply(false, null, '未开启开发者模式');
+  const op = payload.op;
+  const a = payload.args || {};
+  const call = (api, opts) =>
+    new Promise((resolve, reject) =>
+      api(opts, (res) => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve(res)))
+    );
+  try {
+    switch (op) {
+      /* ---- 历史 ---- */
+      case 'history_add': {
+        if (!a.url) return reply(false, null, '缺少 url');
+        const n = Math.max(1, Math.min(50, parseInt(a.count, 10) || 1));
+        for (let i = 0; i < n; i++) await call(chrome.history.addUrl.bind(chrome.history), { url: a.url });
+        return reply(true, { added: n, url: a.url });
+      }
+      case 'history_delete':
+        await call(chrome.history.deleteUrl.bind(chrome.history), { url: a.url });
+        return reply(true, true);
+      case 'history_delete_domain': {
+        const items = await call(chrome.history.search.bind(chrome.history),
+          { text: a.domain || '', startTime: 0, endTime: Date.now(), maxResults: 10000 });
+        let n = 0;
+        for (const it of items || []) {
+          let host = '';
+          try { host = new URL(it.url).hostname; } catch (_e) { /* 忽略非法 URL */ }
+          if (a.domain && (host === a.domain || host.endsWith('.' + a.domain))) {
+            await call(chrome.history.deleteUrl.bind(chrome.history), { url: it.url });
+            n++;
+          }
+        }
+        return reply(true, { deleted: n });
+      }
+      case 'history_delete_range': {
+        const days = Math.max(0, parseInt(a.days, 10) || 0);
+        await call(chrome.history.deleteRange.bind(chrome.history),
+          { startTime: 0, endTime: Date.now() - days * 864e5 });
+        return reply(true, { keptDays: days });
+      }
+      case 'history_delete_all':
+        await new Promise((resolve, reject) =>
+          chrome.history.deleteAll(() => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve())));
+        return reply(true, true);
+      /* ---- 书签 ---- */
+      case 'bookmark_create': {
+        const b = await call(chrome.bookmarks.create.bind(chrome.bookmarks),
+          { parentId: a.parentId || '1', title: a.title || '未命名', url: a.url });
+        return reply(true, b);
+      }
+      case 'bookmark_save': {
+        const ch = {};
+        if (a.title != null) ch.title = a.title;
+        if (a.url != null) ch.url = a.url;
+        const b = await call(chrome.bookmarks.update.bind(chrome.bookmarks), a.id, ch);
+        return reply(true, b);
+      }
+      case 'bookmark_delete':
+        await new Promise((resolve, reject) =>
+          chrome.bookmarks.remove(a.id, () => {
+            if (!chrome.runtime.lastError) return resolve();
+            chrome.bookmarks.removeTree(a.id, () =>
+              chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve());
+          }));
+        return reply(true, true);
+      /* ---- 下载 ---- */
+      case 'downloads_erase': {
+        const q = a.all ? {} : { id: a.id };
+        const ids = await call(chrome.downloads.erase.bind(chrome.downloads), q);
+        return reply(true, { erased: (ids || []).length });
+      }
+      /* ---- Cookie ---- */
+      case 'cookie_set': {
+        await call(chrome.cookies.set.bind(chrome.cookies),
+          { url: a.url, name: a.name, value: a.value == null ? '' : String(a.value) });
+        return reply(true, true);
+      }
+      case 'cookie_remove':
+        await call(chrome.cookies.remove.bind(chrome.cookies), { url: a.url, name: a.name });
+        return reply(true, true);
+      default:
+        return reply(false, null, '未知篡改操作: ' + op);
+    }
+  } catch (e) {
+    return reply(false, null, e && e.message ? e.message : String(e));
+  }
 }
