@@ -232,6 +232,7 @@
     ['audio', '音频管理', '智能静音'],
     ['privacy', '隐私防护', '指纹加固'],
     ['browserpilot', 'AI 操控', '网页 AI 操作浏览器'],
+    ['tamper', '开发者·篡改', '数据修改（需密码）'],
     ['settings', '偏好设置', '主题与范围'],
   ];
   let moreOpen = false;
