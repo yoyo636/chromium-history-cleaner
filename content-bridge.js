@@ -127,6 +127,18 @@
   const DEBUG = true;
   function bpLog(...args) { if (DEBUG) console.log('[BrowserPilot]', ...args); }
 
+  /* ---------- 浮动面板状态行：把检测/执行状态直接显示在页面上，无需开控制台 ----------
+   * 用户一眼就能看到：是否在监听、是否检测到 tool_call、执行了哪个工具、是否出错。
+   */
+  let bpStatusEl = null;
+  function bpStatus(text, color) {
+    if (bpStatusEl) {
+      bpStatusEl.textContent = text;
+      bpStatusEl.style.color = color || '#9ca3af';
+    }
+    bpLog('[status]', text);
+  }
+
   /* ---------- 清洗 AI 可能输出的非标准 JSON ----------
    * 大模型有时会生成单引号 JSON、中文引号、markdown 围栏、多余逗号或注释。
    * 本函数尽量还原成标准 JSON；还原失败则返回原串供上层再次尝试。
@@ -222,28 +234,44 @@
     bpLog('开始检测 <tool_call>，文本长度=', text.length);
     const re = /<tool_call>([\s\S]*?)<\/tool_call>/g;
     let m;
+    let count = 0;
     while ((m = re.exec(text)) !== null) {
+      count++;
       const parsed = parseToolCall(m[1]);
       if (!parsed || !parsed.tool || typeof parsed.args !== 'object' || parsed.args === null) {
         console.warn('[BrowserPilot] 工具 JSON 解析失败，原始内容:', m[1].trim().slice(0, 200));
+        bpStatus('⚠️ 解析失败: ' + m[1].trim().slice(0, 40), '#f87171');
         continue;
       }
       const fp = stableFingerprint(parsed.tool, parsed.args);
       if (processed.has(fp)) { bpLog('已执行过，跳过', parsed.tool); continue; }
       processed.add(fp);
       bpLog('执行工具', parsed.tool, parsed.args);
+      bpStatus('🔧 执行: ' + parsed.tool + ' …', '#fbbf24');
       executeTool(parsed.tool, parsed.args);
     }
+    if (count) bpStatus('✅ 已捕获 ' + count + ' 个指令', '#34d399');
   }
 
   /* ---------- 发送指令给 background，并回填结果 ---------- */
   function executeTool(tool, args) {
+    bpStatus('🔧 执行: ' + tool + ' …', '#fbbf24');
     chrome.runtime.sendMessage(
       { type: 'EXECUTE_TOOL', payload: { tool, args } },
       (resp) => {
-        if (chrome.runtime.lastError) { console.warn('[BrowserPilot] 通信错误:', chrome.runtime.lastError.message); return; }
-        if (resp && resp.ok) injectResult(resp.data);
-        else console.warn('[BrowserPilot] 执行失败:', resp && resp.error);
+        if (chrome.runtime.lastError) {
+          console.warn('[BrowserPilot] 通信错误:', chrome.runtime.lastError.message);
+          bpStatus('❌ 通信错误: ' + chrome.runtime.lastError.message.slice(0, 40), '#f87171');
+          return;
+        }
+        if (resp && resp.ok) {
+          const d = resp.data || {};
+          bpStatus('✅ ' + tool + ' 完成' + (d.success === false ? ' (目标页失败)' : ''), d.success === false ? '#f87171' : '#34d399');
+          injectResult(resp.data);
+        } else {
+          console.warn('[BrowserPilot] 执行失败:', resp && resp.error);
+          bpStatus('❌ ' + tool + ' 失败: ' + String(resp && resp.error || '').slice(0, 40), '#f87171');
+        }
       }
     );
   }
@@ -292,7 +320,13 @@
     const info = document.createElement('span');
     info.textContent = adapter.name;
     info.style.cssText = 'opacity:.8;';
+    const status = document.createElement('span');
+    status.id = 'bp-status-line';
+    status.textContent = '监听中…';
+    status.style.cssText = 'opacity:.9;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    bpStatusEl = status;
     panel.appendChild(info);
+    panel.appendChild(status);
     panel.appendChild(btn);
     document.body.appendChild(panel);
   }
