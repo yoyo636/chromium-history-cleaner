@@ -180,15 +180,38 @@
   }
 
   /* ============================ 引擎驱动循环 ============================ */
+  /* Day1 增量：20-20-20 微休息教练
+   * 连续活跃满 20 分钟且疲劳 ≥2 级时，提示远眺 20 秒；
+   * 提示期间（20s）不计入连续时长（相当于承认了一次微休息）。 */
+  let continuousActiveMin = 0;
+  let coaching = false;
+  function runCoach(level) {
+    if (!ENGINE || coaching) return;
+    const s = ENGINE.summary();
+    if (level >= 2) continuousActiveMin += 1; // 每 REPORT_MS 一格
+    if (continuousActiveMin >= 20 && s.confidence >= 0.4) {
+      coaching = true;
+      continuousActiveMin = 0;
+      const tip = getTip();
+      tip.textContent = '⏸ 20-20-20：看 6 米外 20 秒，我在替你计时';
+      tip.classList.add('show');
+      setTimeout(() => {
+        tip.classList.remove('show');
+        coaching = false;
+      }, 20000);
+    }
+  }
+
   if (ENGINE && ENGINE.ready) {
     // 每 5s：活跃时间心跳（引擎 M1 任务曲线 / M3 恢复模型 / 活跃占比）
     setInterval(() => ENGINE.heartbeat(), 5000);
 
-    // 每 60s：引擎评分 → 渲染目标 + 上报
+    // 每 60s：引擎评分 → 渲染目标 + 上报 + 微休息教练
     setInterval(() => {
       let r;
       try { r = ENGINE.tick(); } catch (_e) { return; }
       targetLevel = r.level; // 供渐进使用
+      runCoach(r.level);
       try {
         chrome.runtime.sendMessage({
           type: 'FATIGUE_REPORT',
