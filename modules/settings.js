@@ -93,6 +93,70 @@
         ])
       );
       root.appendChild(saveBtn);
+
+      /* ---------- 数据随身带：导出 / 导入 ----------
+       * 导出：hcPrefs / sessions / audioLearned / eyecare / privacyMode /
+       *       tamperAuto / focusBlocklist（排除 devMode 等敏感与临时键）
+       * 导入：JSON 校验（app 标识）后写回 storage.local，弹窗自动刷新
+       */
+      const EXPORT_KEYS = ['hcPrefs', 'sessions', 'audioLearned', 'eyecare', 'privacyMode', 'tamperAuto', 'focusBlocklist'];
+      const fileIn = HC.el('input', { type: 'file', accept: '.json,application/json', style: 'display:none;' });
+      fileIn.addEventListener('change', () => {
+        const file = fileIn.files && fileIn.files[0];
+        fileIn.value = '';
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          let obj;
+          try { obj = JSON.parse(reader.result); } catch { return HC.toast('文件不是有效 JSON', 'error'); }
+          if (!obj || obj.app !== 'browser-companion' || !obj.data) return HC.toast('不是本扩展的备份文件', 'error');
+          const data = {};
+          EXPORT_KEYS.forEach((k) => { if (obj.data[k] !== undefined) data[k] = obj.data[k]; });
+          chrome.storage.local.set(data, () => {
+            HC.toast('导入成功，正在刷新…', 'success');
+            setTimeout(() => location.reload(), 600);
+          });
+        };
+        reader.readAsText(file);
+      });
+      const exportBtn = HC.el('button', {
+        class: 'btn btn-primary',
+        text: '⬇ 导出数据',
+        onclick: async () => {
+          const data = await new Promise((r) => chrome.storage.local.get(EXPORT_KEYS, (x) => r(x)));
+          const payload = {
+            app: 'browser-companion',
+            version: chrome.runtime.getManifest().version,
+            exportedAt: new Date().toISOString(),
+            data,
+          };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = HC.el('a', { href: url, download: 'browser-companion-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          HC.toast('已导出（不含密码类数据）', 'success');
+        },
+      });
+      const importBtn = HC.el('button', {
+        class: 'btn',
+        text: '⬆ 导入数据',
+        onclick: () => fileIn.click(),
+      });
+      root.appendChild(
+        HC.el('div', { class: 'opt-list', style: 'margin-top:12px;' }, [
+          HC.el('div', { class: 'opt-row' }, [
+            HC.el('div', { class: 'opt-info' }, [
+              HC.el('div', { class: 'opt-name', text: '数据随身带' }),
+              HC.el('div', { class: 'opt-desc', text: '导出偏好 / 会话 / 学习记录 / 护眼曲线 / 专注黑名单为 JSON；导入后自动刷新。换浏览器 30 秒还原。' }),
+            ]),
+          ]),
+          HC.el('div', { class: 'opt-row' }, [exportBtn, importBtn, fileIn]),
+        ])
+      );
+
       container.appendChild(root);
 
       function save() {
