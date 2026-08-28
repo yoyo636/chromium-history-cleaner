@@ -685,7 +685,26 @@
         confidence: Math.round(this.out.confidence * 100),
         baselineReady: this.profile.welford.mouseSpeed.n >= 60,
         calibratedSamples: this.profile.welford.mouseSpeed.n,
+        prediction: this.predict(),
       };
+    },
+
+    /* ---------- Day1 增量：趋势预测 ----------
+     * 用慢 EMA 与阈值差距 / 当前每分钟斜率，估计「到下一级还要几分钟」。
+     * 斜率估计：fast-slow 差值反映最近约 1 分钟尺度的变化量（双 EMA 的
+     * 等效时间常数差），启发式换算为每分钟点数；趋势为负则返回 null。
+     * 这是启发式投影，置信度低时输出 null。 */
+    predict() {
+      const th = [15, 35, 55, 75];
+      const F = this.out.slow;
+      const slopePerMin = Math.max(0, this.out.trend) / 1.5; // 启发式：EMA 差 → 每分钟点数
+      if (slopePerMin < 0.15) return null;
+      let nextTh = null;
+      for (const t of th) { if (F < t) { nextTh = t; break; } }
+      if (nextTh == null) return null; // 已在 5 级
+      const minutes = (nextTh - F) / slopePerMin;
+      if (!isFinite(minutes) || minutes > 120) return null;
+      return { nextLevelThreshold: nextTh, minutes: Math.round(minutes) };
     },
   };
 
