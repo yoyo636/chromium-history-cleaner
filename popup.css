@@ -924,3 +924,35 @@ input[type="checkbox"] {
   line-height: 1.7;
   color: var(--text);
 }
+
+/* ==================== 开发者模式 · 篡改（tamper） ==================== */
+.tamper-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.tamper-tab {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid var(--line, rgba(120, 130, 150, 0.35));
+  background: transparent;
+  color: inherit;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+.tamper-tab:hover { background: rgba(120, 130, 150, 0.12); }
+.tamper-tab.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border-color: transparent;
+}
+.tamper-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.tamper-form .input { flex: 1; min-width: 0; }
