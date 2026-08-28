@@ -1369,6 +1369,18 @@ async function finalizeFocus(auto) {
   } else if (!completed) {
     focusNotify('专注已结束', '本次提前结束：专注效率 ' + Math.round(efficiency * 100) + '%。');
   }
+
+  // Day1 增量：每日专注目标（默认 60 分钟，只计自然完成的会话）
+  const gd = await focusGet({ focusGoalMinutes: 60 });
+  const goal = gd.focusGoalMinutes || 60;
+  const today = new Date().toDateString();
+  const todayMin = reports
+    .filter((r) => r.completed && new Date(r.end).toDateString() === today)
+    .reduce((a, r) => a + r.minutes, 0);
+  const beforeMin = todayMin - (completed ? focus.minutes : 0);
+  if (todayMin >= goal && beforeMin < goal) {
+    focusNotify('🏆 今日目标达成', '已完成 ' + todayMin + ' / ' + goal + ' 分钟专注，超棒。');
+  }
   return report;
 }
 
