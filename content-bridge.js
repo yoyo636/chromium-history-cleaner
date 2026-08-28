@@ -39,13 +39,29 @@
            findByText('div, span', text, false);
   }
 
+  /* 通用输入框/发送钮兜底查找（各平台 DOM 变化时尽量还能找到） */
+  function commonInput() {
+    return document.querySelector('#chat-input') ||            // DeepSeek 常见
+           document.querySelector('textarea') ||
+           document.querySelector('[contenteditable="true"]') ||
+           document.querySelector('[role="textbox"]');
+  }
+  function commonSend() {
+    return document.querySelector('button[aria-label*="发送" i]') ||
+           document.querySelector('[data-testid="send"]') ||
+           document.querySelector('[data-testid="send-button"]') ||
+           document.querySelector('#send-message-button') ||
+           findBtnByText('发送');
+  }
+
   const ADAPTERS = {
     // ---- Kimi：此处基于假设，可能需要根据实际 DOM 微调 ----
     kimi: {
       name: 'Kimi',
       getInput() {
         return document.querySelector('textarea') ||
-               document.querySelector('[contenteditable="true"]');
+               document.querySelector('[contenteditable="true"]') ||
+               commonInput();
       },
       getSend() {
         return document.querySelector('[data-testid="send-btn"]') ||
@@ -60,15 +76,8 @@
     // ---- DeepSeek：此处基于假设，可能需要根据实际 DOM 微调 ----
     deepseek: {
       name: 'DeepSeek',
-      getInput() {
-        return document.querySelector('textarea') ||
-               document.querySelector('[contenteditable="true"]');
-      },
-      getSend() {
-        return document.querySelector('button[aria-label*="发送" i]') ||
-               document.querySelector('[data-testid="send"]') ||
-               findBtnByText('发送');
-      },
+      getInput() { return commonInput(); },
+      getSend() { return commonSend(); },
       getChat() {
         return document.querySelector('[class*="chat" i]') ||
                document.querySelector('main') || document.body;
@@ -77,14 +86,8 @@
     // ---- MiniMax：扩展预留，此处基于假设，可能需要根据实际 DOM 微调 ----
     minimax: {
       name: 'MiniMax',
-      getInput() {
-        return document.querySelector('textarea') ||
-               document.querySelector('[contenteditable="true"]');
-      },
-      getSend() {
-        return document.querySelector('button[aria-label*="发送" i]') ||
-               findBtnByText('发送');
-      },
+      getInput() { return commonInput(); },
+      getSend() { return commonSend(); },
       getChat() {
         return document.querySelector('[class*="chat" i]') ||
                document.querySelector('main') || document.body;
@@ -256,34 +259,54 @@
   /* ---------- 发送指令给 background，并回填结果 ---------- */
   function executeTool(tool, args) {
     bpStatus('🔧 执行: ' + tool + ' …', '#fbbf24');
-    chrome.runtime.sendMessage(
-      { type: 'EXECUTE_TOOL', payload: { tool, args } },
-      (resp) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[BrowserPilot] 通信错误:', chrome.runtime.lastError.message);
-          bpStatus('❌ 通信错误: ' + chrome.runtime.lastError.message.slice(0, 40), '#f87171');
-          return;
+    /* 关键：扩展被重载后，旧页面的 content script 的 runtime 已失效，
+     * sendMessage 会同步抛 "Extension context invalidated"。
+     * 不捕获的话用户只会看到"毫无反应"，所以必须显式提示刷新页面。 */
+    let callOk = true;
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'EXECUTE_TOOL', payload: { tool, args } },
+        (resp) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[BrowserPilot] 通信错误:', chrome.runtime.lastError.message);
+            bpStatus('❌ 通信错误: ' + chrome.runtime.lastError.message.slice(0, 40), '#f87171');
+            return;
+          }
+          if (resp && resp.ok) {
+            const d = resp.data || {};
+            bpStatus('✅ ' + tool + ' 完成' + (d.success === false ? ' (目标页失败)' : ''), d.success === false ? '#f87171' : '#34d399');
+            injectResult(resp.data);
+          } else {
+            console.warn('[BrowserPilot] 执行失败:', resp && resp.error);
+            bpStatus('❌ ' + tool + ' 失败: ' + String(resp && resp.error || '').slice(0, 40), '#f87171');
+          }
         }
-        if (resp && resp.ok) {
-          const d = resp.data || {};
-          bpStatus('✅ ' + tool + ' 完成' + (d.success === false ? ' (目标页失败)' : ''), d.success === false ? '#f87171' : '#34d399');
-          injectResult(resp.data);
-        } else {
-          console.warn('[BrowserPilot] 执行失败:', resp && resp.error);
-          bpStatus('❌ ' + tool + ' 失败: ' + String(resp && resp.error || '').slice(0, 40), '#f87171');
-        }
-      }
-    );
+      );
+    } catch (e) {
+      callOk = false;
+      console.warn('[BrowserPilot] runtime 已失效:', e);
+      bpStatus('❌ 扩展已重载，请刷新本页面（F5）', '#f87171');
+    }
+    return callOk;
   }
+  /* 自检模式下抑制结果回填，避免测试指令被当成消息发给 AI */
+  let suppressResult = false;
   function injectResult(result) {
+    if (suppressResult) { bpStatus('✅ 自检：结果回填链路正常（已抑制发送）', '#34d399'); return; }
     const input = adapter.getInput();
-    if (!input) return;
+    if (!input) {
+      /* 旧版本在这里静默 return，导致"执行成功但 AI 永远看不到结果"却毫无提示 */
+      bpStatus('⚠️ 执行成功，但找不到 AI 输入框，结果未回传', '#f87171');
+      console.warn('[BrowserPilot] injectResult: 找不到输入框，结果:', result);
+      return;
+    }
     const payload = '\n\n<tool_result>' + JSON.stringify(result) + '</tool_result>\n';
     const cur = (input.value || input.innerText || '');
     setInputValue(input, cur + payload);
     if (AUTO_SEND_RESULT) {
       const btn = adapter.getSend();
       if (btn) setTimeout(() => btn.click(), 200);
+      else bpStatus('⚠️ 已填入结果，但找不到发送按钮，请手动发送', '#fbbf24');
     }
   }
 
@@ -307,28 +330,90 @@
     return { ok: true };
   }
 
-  /* ---------- 浮动控制条 ---------- */
+  /* ---------- 浮动控制条 ----------
+   * 注意：扩展重载后旧页面的旧脚本会留下一个"僵尸面板"，
+   * 所以这里每次都先移除旧面板再重建（新脚本的 runtime 才是活的）。
+   */
+  const BP_VERSION = '4.2.1';
   function buildFloatingPanel() {
-    if (document.getElementById('bp-bridge-panel')) return;
+    const old = document.getElementById('bp-bridge-panel');
+    if (old) old.remove();
     const panel = document.createElement('div');
     panel.id = 'bp-bridge-panel';
     panel.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#111827;color:#fff;font:12px/1.4 sans-serif;padding:8px 10px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);display:flex;gap:8px;align-items:center;';
     const btn = document.createElement('button');
     btn.textContent = '🛰 注入协议';
     btn.style.cssText = 'background:#2563eb;color:#fff;border:none;padding:6px 10px;border-radius:8px;cursor:pointer;';
-    btn.onclick = () => injectProtocol();
+    btn.onclick = () => {
+      try { injectProtocol(); }
+      catch (e) { bpStatus('❌ 扩展已重载，请刷新本页面（F5）', '#f87171'); }
+    };
+    /* 自检按钮：完全绕过 AI，直接验证「消息通道 → 后台 → 目标页执行 → 检测管线」 */
+    const testBtn = document.createElement('button');
+    testBtn.textContent = '🧪 自检';
+    testBtn.title = '绕过 AI 直接测试整条执行链路';
+    testBtn.style.cssText = 'background:#7c3aed;color:#fff;border:none;padding:6px 10px;border-radius:8px;cursor:pointer;';
+    testBtn.onclick = () => { try { runSelfTest(); } catch (e) { bpStatus('❌ 扩展已重载，请刷新本页面（F5）', '#f87171'); } };
     const info = document.createElement('span');
-    info.textContent = adapter.name;
+    info.textContent = adapter.name + ' v' + BP_VERSION;
     info.style.cssText = 'opacity:.8;';
     const status = document.createElement('span');
     status.id = 'bp-status-line';
     status.textContent = '监听中…';
-    status.style.cssText = 'opacity:.9;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    status.style.cssText = 'opacity:.9;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     bpStatusEl = status;
     panel.appendChild(info);
     panel.appendChild(status);
+    panel.appendChild(testBtn);
     panel.appendChild(btn);
     document.body.appendChild(panel);
+  }
+
+  /* ---------- 自检：4 步定位断点 ----------
+   * 1/4 后台连通（BP_GET_CONTEXT）→ 证明消息通道 + background 活着
+   * 2/4 试开 example.com（browser_navigate）→ 证明后台建标签页 + 注入执行 OK
+   * 3/4 读取目标页（browser_read）→ 证明目标页注入执行 + 结果回传 OK
+   * 4/4 合成 <tool_call> 走检测管线 → 证明「扫描→解析→执行」这条 AI 指令路径 OK
+   * 全过 ⇒ 问题只可能在「AI 是否按协议输出」；第 N 步挂 ⇒ 断点就在那里。
+   */
+  function sendMsg(payload) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(payload, (resp) => {
+          if (chrome.runtime.lastError) resolve({ err: chrome.runtime.lastError.message });
+          else resolve(resp || { err: '空响应' });
+        });
+      } catch (e) { resolve({ err: '扩展已重载，请刷新本页面: ' + e.message }); }
+    });
+  }
+  async function runSelfTest() {
+    bpStatus('🧪 1/4 后台连通…', '#fbbf24');
+    const r1 = await sendMsg({ type: 'BP_GET_CONTEXT' });
+    if (r1.err || !r1.ok) { bpStatus('❌ 1/4 后台不通: ' + String(r1.err || r1.error || '').slice(0, 50), '#f87171'); return; }
+    const tid = r1.data && r1.data.targetTabId != null ? r1.data.targetTabId : '无';
+    bpStatus('✅ 1/4 后台 OK（当前目标页: ' + tid + '）', '#34d399');
+
+    bpStatus('🧪 2/4 试开 example.com…', '#fbbf24');
+    const r2 = await sendMsg({ type: 'EXECUTE_TOOL', payload: { tool: 'browser_navigate', args: { url: 'https://example.com/' } } });
+    if (r2.err || !r2.ok) { bpStatus('❌ 2/4 导航失败: ' + String(r2.err || r2.error || '').slice(0, 50), '#f87171'); return; }
+    bpStatus('✅ 2/4 已打开 example.com', '#34d399');
+
+    bpStatus('🧪 3/4 读取目标页…', '#fbbf24');
+    const r3 = await sendMsg({ type: 'EXECUTE_TOOL', payload: { tool: 'browser_read', args: { maxLength: 200 } } });
+    if (r3.err || !r3.ok || !(r3.data && r3.data.success !== false)) {
+      bpStatus('❌ 3/4 读取失败: ' + String(r3.err || (r3.data && r3.data.error) || r3.error || '').slice(0, 50), '#f87171'); return;
+    }
+    const head = (r3.data.data && r3.data.data.content || '').replace(/\s+/g, ' ').slice(0, 30);
+    bpStatus('✅ 3/4 目标页执行 OK: "' + head + '…"', '#34d399');
+
+    bpStatus('🧪 4/4 合成指令走检测管线…', '#fbbf24');
+    suppressResult = true;
+    const fake = document.createElement('div');
+    fake.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
+    fake.textContent = '<tool_call>{"tool":"browser_scroll","args":{"amount":10,"direction":"down","nonce":' + Date.now() + '}}</tool_call>';
+    document.body.appendChild(fake);
+    try { detectToolCall(); } finally { setTimeout(() => { if (fake.parentNode) fake.parentNode.removeChild(fake); }, 500); }
+    setTimeout(() => { suppressResult = false; }, 3000);
   }
 
   /* ---------- 接收弹窗的协议注入指令 ---------- */
