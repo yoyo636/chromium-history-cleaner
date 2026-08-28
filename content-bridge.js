@@ -177,6 +177,10 @@
     }
     return out;
   }
+  function decodeEntities(t) {
+    if (typeof t !== 'string' || t.indexOf('&lt;') === -1) return t;
+    return t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  }
   function findToolCallSource() {
     const nodes = collectAllNodes(document.body, []);
     const candidates = [];
@@ -184,10 +188,10 @@
       if (node.nodeType === Node.ELEMENT_NODE) {
         const tag = node.tagName;
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue;
-        const text = (node.innerText || node.textContent || '');
+        const text = decodeEntities(node.innerText || node.textContent || '');
         if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
       } else if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent || '';
+        const text = decodeEntities(node.textContent || '');
         if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
       }
     }
@@ -302,9 +306,10 @@
     return false;
   });
 
-  /* ---------- 在多个根节点上启动 MutationObserver ----------
-   * 聊天内容可能放在 shadow root 里，因此监听 body 和已存在的 shadow roots。
-   * 同时启动兜底轮询，防止 observer 遗漏或页面用虚拟 DOM 不触发 Mutation。
+  /* ---------- 启动：监听 document 级 + 动态补挂 shadow root + 常驻兜底轮询 ----------
+   * - 监听 document.documentElement 可覆盖普通 DOM 的流式/虚拟 DOM 变化；
+   * - 每个轮询周期补挂新出现的 shadow root，避免 shadow 内 <tool_call> 漏检；
+   * - setInterval 兜底持续运行（降频 1500ms），覆盖一切 MutationObserver 漏掉的边缘场景。
    */
   function observeRoot(root, obs) {
     try {
@@ -312,25 +317,23 @@
       bpLog('监听 root:', root.nodeName || 'shadowRoot');
     } catch (e) { bpLog('监听 root 失败', e); }
   }
-  function collectShadowRoots() {
-    const roots = [];
-    collectAllNodes(document.body, []).forEach((n) => { if (n.nodeType === Node.ELEMENT_NODE && n.shadowRoot) roots.push(n.shadowRoot); });
-    return roots;
-  }
   function start() {
     buildFloatingPanel();
     const obs = new MutationObserver(throttle(detectToolCall, 300));
-    observeRoot(document.body, obs);
-    setTimeout(() => {
-      const roots = collectShadowRoots();
-      roots.forEach((r) => observeRoot(r, obs));
-    }, 1000);
-    // 兜底轮询：每 800ms 全页扫描一次，最多 40 次（32 秒），覆盖流式/虚拟 DOM 场景
-    let pollCount = 0;
-    const poll = setInterval(() => {
-      detectToolCall();
-      if (++pollCount >= 40) clearInterval(poll);
-    }, 800);
+    observeRoot(document.documentElement, obs);
+    const seenRoots = new WeakSet();
+    function scanAndMountShadow() {
+      collectAllNodes(document.body, []).forEach((n) => {
+        if (n.nodeType === Node.ELEMENT_NODE && n.shadowRoot && !seenRoots.has(n.shadowRoot)) {
+          seenRoots.add(n.shadowRoot);
+          observeRoot(n.shadowRoot, obs);
+        }
+      });
+    }
+    scanAndMountShadow();
+    setTimeout(scanAndMountShadow, 1500);
+    detectToolCall(); // 首屏立即检测一次
+    setInterval(() => { scanAndMountShadow(); detectToolCall(); }, 1500); // 常驻兜底
     window.BrowserPilot = { injectProtocol, getPlatform: () => PLATFORM, detectNow: detectToolCall };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
