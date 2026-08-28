@@ -334,6 +334,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       handleTamperOp(payload, reply);
       return true;
 
+    case 'FOCUS_END':
+      chrome.storage.local.get({ focus: null, focusEvents: [] }, (x) => {
+        const st = x.focus;
+        const ev = (x.focusEvents || []).filter((e) => st && e.t >= st.start);
+        chrome.storage.local.set({
+          focus: null,
+          lastFocusReport: { start: st ? st.start : Date.now(), end: Date.now(), minutes: st ? st.minutes : 0, nudges: ev.length },
+        });
+        reply(true, { nudges: ev.length });
+      });
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -1118,3 +1130,69 @@ async function handleTamperOp(payload, reply) {
     return reply(false, null, e && e.message ? e.message : String(e));
   }
 }
+
+
+/* =========================================================================
+ * 专注模式（后台侧）
+ * - 打开黑名单站点时温和提醒（通知），并记录 focusEvents 供报告
+ * - chrome.alarms 定时「hc-focus-end」到点生成报告并通知
+ * - 每个 host 2 分钟内只提醒一次，避免打扰
+ * ========================================================================= */
+const focusNudgeAt = {}; // host -> 上次提醒时间（内存即可，重载丢失无妨）
+
+function focusHostOf(url) {
+  try { return new URL(url).hostname; } catch (_e) { return ''; }
+}
+
+async function focusCheckTab(tab) {
+  if (!tab || !tab.active || !tab.url || !tab.url.startsWith('http')) return;
+  const st = await new Promise((r) => chrome.storage.local.get({ focus: null }, (x) => r(x.focus)));
+  if (!st || !st.until || st.until <= Date.now()) return;
+  const host = focusHostOf(tab.url);
+  if (!host) return;
+  const list = (st.blocklist || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  const hit = list.some((d) => host === d || host.endsWith('.' + d));
+  if (!hit) return;
+  const now = Date.now();
+  if (focusNudgeAt[host] && now - focusNudgeAt[host] < 120000) return;
+  focusNudgeAt[host] = now;
+  const mins = Math.max(1, Math.round((st.until - now) / 60000));
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      title: '🎯 专注模式',
+      message: '「' + host + '」在专注黑名单里，剩余 ' + mins + ' 分钟。忍住！',
+    });
+  } catch (_e) { /* 通知失败不影响记录 */ }
+  const ev = await new Promise((r) => chrome.storage.local.get({ focusEvents: [] }, (x) => r(x.focusEvents)));
+  ev.push({ t: now, host });
+  chrome.storage.local.set({ focusEvents: ev.slice(-200) });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status === 'complete' || info.url) focusCheckTab(tab);
+});
+chrome.tabs.onActivated.addListener((ai) => {
+  getTabSafe(ai.tabId).then(focusCheckTab);
+});
+
+chrome.alarms.onAlarm.addListener((al) => {
+  if (al.name !== 'hc-focus-end') return;
+  chrome.storage.local.get({ focus: null, focusEvents: [] }, (x) => {
+    const st = x.focus;
+    if (!st) return;
+    const mine = (x.focusEvents || []).filter((e) => e.t >= st.start);
+    chrome.storage.local.set({
+      focus: null,
+      lastFocusReport: { start: st.start, end: Date.now(), minutes: st.minutes, nudges: mine.length },
+    });
+    try {
+      chrome.action.setBadgeText({ text: '' });
+      chrome.notifications.create({
+        type: 'basic',
+        title: '专注结束 🎉',
+        message: '本次专注 ' + st.minutes + ' 分钟，期间温和提醒 ' + mine.length + ' 次。',
+      });
+    } catch (_e) { /* 忽略 */ }
+  });
+});
