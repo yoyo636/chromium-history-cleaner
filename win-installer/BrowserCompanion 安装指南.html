@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>浏览器搭子 · 安装指南</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #1d2230; line-height: 1.7; }
+  h1 { font-size: 26px; } h2 { font-size: 19px; margin-top: 32px; border-left: 4px solid #4c7bf3; padding-left: 10px; }
+  .card { background: #f6f8fc; border-radius: 12px; padding: 16px 20px; margin: 14px 0; }
+  .ok { color: #2c9d6b; font-weight: 600; } .warn { color: #e5484d; font-weight: 600; }
+  ol li, ul li { margin: 6px 0; }
+  code { background: #eef1f7; padding: 2px 6px; border-radius: 5px; font-size: 13px; }
+  .ver { color: #5b6472; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>🧭 浏览器搭子 · 安装指南</h1>
+<p class="ver">版本 4.6.0 · 安装位置 <code>%LOCALAPPDATA%\BrowserCompanion</code></p>
+
+<h2>一、安装完成后发生了什么</h2>
+<div class="card">
+  <p><span class="ok">✅ 扩展文件已安装到本机</span>（含全部 14 个功能模块：历史清理、AI 操控、护眼引擎、专注模式等）</p>
+  <p>如果安装最后一步勾选了「运行重新载入扩展」，你的浏览器会<strong>自动带着扩展启动</strong> —— 右上角出现 🧭 图标即安装成功，无需其他操作。</p>
+</div>
+
+<h2>二、浏览器里没有看到扩展？手动载入（3 次点击）</h2>
+<div class="card">
+  <p>部分新版浏览器（如 Chrome 正式版）出于安全策略限制自动载入，此时手动载入一次即可，以后一直有效：</p>
+  <ol>
+    <li>地址栏输入 <code>chrome://extensions</code>（Edge 为 <code>edge://extensions</code>）并回车</li>
+    <li>打开右上角（Edge 在左侧）的<strong>「开发者模式」</strong>开关</li>
+    <li>点<strong>「加载已解压的扩展程序」</strong>，选择文件夹：<br><code>%LOCALAPPDATA%\BrowserCompanion\extension</code></li>
+  </ol>
+  <p>出现「开发者模式扩展」提示气泡属正常，点 ✕ 关闭即可。</p>
+</div>
+
+<h2>三、日常使用</h2>
+<div class="card">
+  <ul>
+    <li>点浏览器右上角 🧭 图标打开主面板（14 个功能都在里面）</li>
+    <li>升级：重新运行安装包覆盖安装后，到 <code>chrome://extensions</code> 点扩展卡片上的刷新按钮 🔄</li>
+    <li>AI 操控 / 篡改 / 专注等功能说明见项目内 <code>ALGORITHM.md</code> 与各模块内提示</li>
+  </ul>
+</div>
+
+<h2>四、卸载</h2>
+<div class="card">
+  <p>开始菜单 → 「BrowserCompanion」→「卸载」；然后到 <code>chrome://extensions</code> 移除扩展卡片。</p>
+</div>
+
+<h2>五、为什么需要手动载入这一步？（技术说明）</h2>
+<div class="card">
+  <p>Chrome / Edge 的安全策略规定：第三方安装程序不能把扩展直接注册进浏览器，<strong>只有官方商店或企业管理员策略可以</strong>。所以「安装包 + 一次性手动载入」是自分发扩展的标准形态。如果以后把扩展上架 Chrome 商店，就可以做到完全静默安装（注册表外部分发），届时更新安装包即可。</p>
+</div>
+</body>
+</html>
