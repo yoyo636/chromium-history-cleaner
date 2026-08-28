@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "浏览器搭子 · 历史与标签页管家",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "description": "实用的跨浏览器搭子：历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档、数据统计、视觉疲劳自适应护眼、标签页性能透视、音频静音管理、无痕追踪防护，以及 AI 操控（让网页端 AI 安全控制浏览器执行点击、输入、滚动等操作）。兼容 Chromium 内核与 Firefox。",
   "browser_specific_settings": {
     "gecko": {
@@ -27,21 +27,38 @@
   ],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "css": ["content.css"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content_perf.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content_perf.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content_privacy.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content_privacy.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
@@ -58,7 +75,9 @@
     }
   },
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "icons": {
     "16": "icons/icon16.png",
