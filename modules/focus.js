@@ -168,9 +168,34 @@
       ])
     );
 
-    // 载入黑名单 + 统计
-    getStorage({ focusBlocklist: DEFAULT_BLOCKLIST, focusStats: null }).then((s) => {
+    // 载入黑名单 + 统计 + 每日目标
+    getStorage({ focusBlocklist: DEFAULT_BLOCKLIST, focusStats: null, focusReports: [], focusGoalMinutes: 60 }).then((s) => {
       ta.value = (s.focusBlocklist || DEFAULT_BLOCKLIST).join('\n');
+
+      /* ---- Day1 增量：每日目标 + 进度条 ---- */
+      const goal = s.focusGoalMinutes || 60;
+      const today = new Date().toDateString();
+      const todayMin = (s.focusReports || [])
+        .filter((r) => r.completed && new Date(r.end).toDateString() === today)
+        .reduce((a, r) => a + r.minutes, 0);
+      const goalRow = HC.el('div', { class: 'opt-row', style: 'margin:8px 0;align-items:center;' }, [
+        HC.el('div', { class: 'opt-info' }, [
+          HC.el('div', { class: 'opt-name', text: `今日目标 ${todayMin} / ${goal} 分钟` }),
+          HC.el('div', { class: 'bar', style: 'width:220px;' }, [
+            HC.el('div', { class: 'bar-fill', style: 'width:' + Math.min(100, Math.round((todayMin / goal) * 100)) + '%;background:' + (todayMin >= goal ? 'var(--success)' : 'var(--accent)') }),
+          ]),
+        ]),
+      ]);
+      const goalIn = HC.el('input', { class: 'input', type: 'number', min: '10', max: '600', value: String(goal), style: 'width:76px;flex:none;' });
+      goalIn.addEventListener('change', () => {
+        const v = Math.max(10, Math.min(600, parseInt(goalIn.value, 10) || 60));
+        chrome.storage.local.set({ focusGoalMinutes: v });
+        HC.toast('每日目标已设为 ' + v + ' 分钟', 'success');
+        HC.modules.focus.render(root.parentNode);
+      });
+      goalRow.appendChild(goalIn);
+      root.insertBefore(goalRow, ta);
+
       if (s.focusStats && (s.focusStats.completed || s.focusStats.streak)) {
         root.insertBefore(
           HC.el('div', { class: 'opt-desc', style: 'margin:8px 0;', text:
@@ -231,6 +256,25 @@
         ]));
       });
       root.appendChild(list);
+
+      /* ---- Day1 增量：周报聚合（近 7 天） ---- */
+      const week = (s.focusReports || []).filter((r) => Date.now() - r.end <= 7 * 864e5);
+      if (week.length >= 2) {
+        const totalMin = week.reduce((a, r) => a + (r.completed ? r.minutes : 0), 0);
+        const doneRate = Math.round((week.filter((r) => r.completed).length / week.length) * 100);
+        const avgEff = Math.round((week.reduce((a, r) => a + (r.efficiency || 0), 0) / week.length) * 100);
+        const resist = week.reduce((a, r) => a + r.resisted, 0);
+        const broke = week.reduce((a, r) => a + r.broken, 0);
+        const winRate = resist + broke ? Math.round((resist / (resist + broke)) * 100) : null;
+        root.appendChild(HC.el('div', { class: 'section-subtitle', text: '📈 周报（近 7 天）' }));
+        root.appendChild(
+          HC.el('div', { class: 'row glass', style: 'display:block;padding:12px;' }, [
+            HC.el('div', { class: 'opt-desc', text:
+              `专注 ${totalMin} 分钟（${week.length} 次会话）· 完成率 ${doneRate}% · 平均效率 ${avgEff}%` +
+              (winRate != null ? ` · 忍住率 ${winRate}%（${resist} 胜 / ${broke} 败）` : '') }),
+          ])
+        );
+      }
     });
   }
 })();
