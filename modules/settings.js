@@ -34,6 +34,30 @@
       // 清理二次确认
       const confirmChk = HC.el('input', { type: 'checkbox' });
 
+      // 开发者模式（篡改功能总开关，密码校验在 background）
+      const devBtn = HC.el('button', { class: 'mini', text: '…', onclick: toggleDev });
+      function refreshDevBtn(on) {
+        devBtn.textContent = on ? '关闭开发者模式' : '开启开发者模式';
+        devBtn.style.background = on ? 'rgba(229, 57, 53, 0.12)' : '';
+        devBtn.style.color = on ? '#e53935' : '';
+      }
+      async function toggleDev() {
+        const cur = await new Promise((res) => chrome.storage.local.get({ devMode: false }, (r) => res(!!r.devMode)));
+        const pass = await HC.prompt({
+          title: cur ? '关闭开发者模式' : '开启开发者模式',
+          body: cur ? '再次输入相同密码即可关闭' : '输入开发者密码以启用「篡改」功能',
+          placeholder: '密码',
+        });
+        if (pass == null || !pass) return;
+        chrome.runtime.sendMessage({ type: 'TAMPER_SET_DEV', payload: { on: !cur, pass } }, (resp) => {
+          if (chrome.runtime.lastError) return HC.toast(chrome.runtime.lastError.message, 'error');
+          if (resp && resp.ok) {
+            HC.toast(!cur ? '开发者模式已开启，可在「更多 → 开发者·篡改」使用' : '开发者模式已关闭', 'success');
+            refreshDevBtn(!cur);
+          } else HC.toast((resp && resp.error) || '密码错误', 'error');
+        });
+      }
+
       const saveBtn = HC.el('button', { class: 'btn btn-primary', text: '保存设置', onclick: save });
 
       root.appendChild(
@@ -59,6 +83,13 @@
             ]),
             HC.el('label', { class: 'chk opt-ctrl' }, [confirmChk, HC.el('span', { text: '开启确认' })]),
           ]),
+          HC.el('div', { class: 'opt-row' }, [
+            HC.el('div', { class: 'opt-info' }, [
+              HC.el('div', { class: 'opt-name', text: '开发者模式（篡改）' }),
+              HC.el('div', { class: 'opt-desc', text: '启用「更多 → 开发者·篡改」模块，可修改历史 / 书签 / 下载 / Cookie' }),
+            ]),
+            devBtn,
+          ]),
         ])
       );
       root.appendChild(saveBtn);
@@ -82,6 +113,7 @@
         rangeSel.value = prefs.defRange;
         confirmChk.checked = !!prefs.cleanupConfirm;
       });
+      chrome.storage.local.get({ devMode: false }, (r) => refreshDevBtn(!!r.devMode));
     },
   };
 })();
