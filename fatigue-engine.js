@@ -391,6 +391,32 @@
 
   const PAGE_LABEL = { code: '代码', article: '长文', table: '表格', generic: '通用' };
 
+  /* ---------- Day8：爆表信号源 → 针对性休息动作 ----------
+   * 光说「你累了」没用，得说清「你是哪种累」：
+   * 鼠标僵、滚动乱、打字猛、看得久，对应的恢复动作完全不同。 */
+  const SIGNAL_ADVICE = {
+    mouse: { label: '鼠标动作变慢变僵', action: '放下鼠标，手腕画圈 10 次，再看 6 米外 20 秒' },
+    scroll: { label: '滚动开始来回打转', action: '先写下你要找什么，再决定还找不找' },
+    key: { label: '打字节奏异常', action: '停手 1 分钟：握拳—张开 10 次，松一松肩颈' },
+    click: { label: '点击变得频繁', action: '关掉多余的标签页，只留一个当前任务' },
+    video: { label: '连续被动看视频', action: '起身走动 3 分钟，剩下的明天倍速看' },
+    reading: { label: '阅读速度下滑', action: '闭眼 30 秒，再刻意眨眼 10 次润一下眼' },
+    daze: { label: '人在心不在', action: '承认走神：换个简单小任务，或真的休息 5 分钟' },
+  };
+
+  /** 生成针对性休息建议（3 级以下不打扰；最多给两条，避免又长又不做） */
+  function restAdvice(top, level, activeMin, circ) {
+    if (level < 3) return null;
+    const parts = [];
+    if (circ >= 1.05) parts.push('现在是昼夜节律低谷，硬撑不如小睡 20 分钟');
+    if (activeMin >= 45) parts.push(`已连续 ${Math.round(activeMin)} 分钟，起身接杯水走动 2 分钟`);
+    if (top && SIGNAL_ADVICE[top.key]) {
+      const a = SIGNAL_ADVICE[top.key];
+      parts.push(`主要是「${a.label}」（占 ${Math.round(top.share * 100)}%）——${a.action}`);
+    }
+    return parts.length ? parts.slice(0, 2).join('；') : null;
+  }
+
   /**
    * 页面类型检测：DOM 结构特征 + 编辑器特征 + 文本体量，返回类型与判定依据。
    * 判定顺序 code → table → article → generic（越具体的形态优先）。
@@ -458,6 +484,8 @@
         keyGap: new Welford(),
       },
       p2: { speedSlow: new P2Quantile(0.35), reversal: new P2Quantile(0.7) },
+      // Backlog：等级转移计数 trans[from*5+to]（5×5 扁平成 25 长度）
+      markov: { trans: new Array(25).fill(0), samples: 0 },
       sessions: 0,
       savedAt: 0,
     },
@@ -482,6 +510,9 @@
             this.profile.p2.reversal = P2Quantile.from(p.p2.reversal || { p: 0.7 });
           }
           this.profile.sessions = p.sessions || 0;
+          if (p.markov && Array.isArray(p.markov.trans) && p.markov.trans.length === 25) {
+            this.profile.markov = { trans: p.markov.trans, samples: p.markov.samples || 0 };
+          }
         }
       } catch (_e) { /* 档案损坏则冷启动 */ }
     },
@@ -503,6 +534,7 @@
               keyGap: p.welford.keyGap.toJSON(),
             },
             p2: { speedSlow: p.p2.speedSlow.toJSON(), reversal: p.p2.reversal.toJSON() },
+            markov: { trans: p.markov.trans, samples: p.markov.samples },
             sessions: p.sessions,
             savedAt: now,
           },
@@ -515,6 +547,7 @@
       for (const k of Object.keys(w)) w[k] = new Welford();
       p.p2.speedSlow = new P2Quantile(0.35);
       p.p2.reversal = new P2Quantile(0.7);
+      p.markov = { trans: new Array(25).fill(0), samples: 0 };
       p.sessions = 0;
       return this.saveProfile(true);
     },
@@ -616,8 +649,9 @@
       this.applyRecovery(nowWall);
 
       // 可用信号 → 贡献值 + 自适应权重（可用性 + 信号置信度）
+      // Day8：顺带记下信号名，用于「这次到底是谁把分数顶上去的」归因
       const parts = [];
-      const push = (v, w) => { if (v != null) parts.push([v, w]); };
+      const push = (v, w, name) => { if (v != null) parts.push([v, w, name]); };
       // Day2：页面类型检测（缓存 60s）→ 自适应权重表 + 信号折减
       const nowP = Date.now();
       if (!this.pageInfo || nowP - (this.pageTypeAt || 0) > PAGE_CACHE_MS) {
@@ -629,23 +663,24 @@
       const PS = PAGE_SIGNAL_SCALE[this.pageType] || PAGE_SIGNAL_SCALE.generic;
       if (sig.mouse) {
         const m = [sig.mouse.slow, sig.mouse.tremor, sig.mouse.jerk].filter((x) => x != null);
-        if (m.length) push(m.reduce((a, b) => a + b, 0) / m.length, PW.mouse);
+        if (m.length) push(m.reduce((a, b) => a + b, 0) / m.length, PW.mouse, 'mouse');
       }
       if (sig.scroll) {
         // wander 在该类页面里可能是正常动作（长文扫读 / 代码跳转），按类型折减
         const slow = sig.scroll.slow;
         const wander = sig.scroll.wander != null ? sig.scroll.wander * PS.wander : null;
         const s = [slow, wander].filter((x) => x != null);
-        if (s.length) push(s.reduce((a, b) => a + b, 0) / s.length, PW.scroll);
+        if (s.length) push(s.reduce((a, b) => a + b, 0) / s.length, PW.scroll, 'scroll');
       }
-      push(sig.key != null ? sig.key * PS.key : null, PW.key);
-      push(sig.click != null ? sig.click * PS.click : null, PW.click);
-      push(sig.video != null ? sig.video * 0.7 : null, PW.video);
-      push(sig.reading, PW.reading);
-      push(sig.daze != null ? sig.daze * 0.6 * PS.daze : null, PW.daze);
+      push(sig.key != null ? sig.key * PS.key : null, PW.key, 'key');
+      push(sig.click != null ? sig.click * PS.click : null, PW.click, 'click');
+      push(sig.video != null ? sig.video * 0.7 : null, PW.video, 'video');
+      push(sig.reading, PW.reading, 'reading');
+      push(sig.daze != null ? sig.daze * 0.6 * PS.daze : null, PW.daze, 'daze');
 
       // 行为信号几何融合
       let behavior = null;
+      let topSignal = null;
       if (parts.length) {
         const wSum = parts.reduce((a, p) => a + p[1], 0);
         let logSum = 0;
@@ -654,6 +689,20 @@
         // 惩罚项：任一信号接近爆表时整体上抬（几何平均的补偿）
         const maxV = Math.max(...parts.map((p) => p[0]));
         if (maxV > 0.75) behavior = clamp01(behavior + (maxV - 0.75) * 0.5);
+        /* Day8：信号归因。几何平均的对数可加，
+         * 因此 log(behavior) = Σ wᵢ·log vᵢ / Σ wᵢ 中每一项的占比可以精确拆分；
+         * log v 全为负，占比 ∈ [0,1] 且总和为 1 —— 这不是拍脑袋的权重显示，
+         * 而是「这一分里各信号各占多少」的真实归因。 */
+        if (logSum < -1e-9) {
+          let bestShare = -1;
+          for (const [v, w, name] of parts) {
+            const share = (w * Math.log(clamp(v, 0.02, 1))) / logSum;
+            if (share > bestShare) {
+              bestShare = share;
+              topSignal = { key: name, label: SIGNAL_ADVICE[name] ? SIGNAL_ADVICE[name].label : name, value: Math.round(v * 100) / 100, share: Math.round(share * 100) / 100 };
+            }
+          }
+        }
       }
 
       // 任务疲劳（分钟）+ 节律
@@ -673,12 +722,12 @@
       this.fatigueReserve = Math.max(this.fatigueReserve * 0.98, raw * 0.15);
 
       const score01 = clamp01(raw);
-      return { score01, sig, task, circ, activeMin };
+      return { score01, sig, task, circ, activeMin, topSignal };
     },
 
     /* ---------- L5：平滑 + 迟滞分级 ---------- */
     step(nowWall) {
-      const { score01, sig, task, circ, activeMin } = this.compute(nowWall);
+      const { score01, sig, task, circ, activeMin, topSignal } = this.compute(nowWall);
       const score = Math.round(score01 * 100);
 
       // 双 EMA + 趋势
@@ -712,11 +761,26 @@
       this.out.level = target;
       this.out.confidence = conf;
 
+      /* Backlog：马尔可夫转移矩阵 —— 记录等级之间的真实跳变。
+       * 与 predict() 的「线性外推」互补：外推只回答「按当前斜率几时到下一级」，
+       * 转移矩阵回答「历史上从这个等级出发，实际最可能去哪」。 */
+      const prevLevel = this.out.prevLevel || this.out.level;
+      if (prevLevel !== this.out.level) {
+        const M = this.profile.markov;
+        M.trans[(prevLevel - 1) * 5 + (this.out.level - 1)] += 1;
+        M.samples += 1;
+      }
+      this.out.prevLevel = this.out.level;
+      // Day8：针对性休息建议（3 级以下为 null，不打扰）
+      this.out.advice = restAdvice(topSignal, this.out.level, activeMin, circ);
+
       return {
         score,
         level: this.out.level,
         confidence: Math.round(conf * 100) / 100,
         trend: Math.round(T * 10) / 10,
+        advice: this.out.advice,
+        topSignal,
         breakdown: {
           pageType: this.pageType || 'generic',
           pageTypeLabel: PAGE_LABEL[this.pageType] || PAGE_LABEL.generic,
@@ -840,6 +904,8 @@
         calibratedSamples: this.profile.welford.mouseSpeed.n,
         prediction: this.predict(),
         diagnostics: this.diagnostics(),
+        markov: this.markov(),
+        advice: this.out.advice || null,
       };
     },
 
@@ -861,6 +927,52 @@
       const minutes = (nextTh - F) / slopePerMin;
       if (!isFinite(minutes) || minutes > 120) return null;
       return { nextLevelThreshold: nextTh, minutes: Math.round(minutes) };
+    },
+
+    /* ---------- Backlog：马尔可夫链（等级跳变建模） ----------
+     * 状态 = 疲劳等级 1..5，转移计数由 step() 累积。
+     * 两个输出：
+     *   ① next        从当前等级出发，历史上最可能去的下一等级及其概率
+     *   ② stationary  转移矩阵的稳态分布（幂迭代 60 轮），
+     *                 即「长期使用下，你停留在各等级的时间占比」
+     * 高等级占比（4+5）可以直接回答「我是不是经常累到 4 级以上」。 */
+    markov() {
+      const M = this.profile.markov;
+      const rowSum = (i) => {
+        let s = 0;
+        for (let j = 0; j < 5; j++) s += M.trans[i * 5 + j];
+        return s;
+      };
+      const cur = clamp(this.out.level, 1, 5) - 1;
+      const total = rowSum(cur);
+      let next = null;
+      if (total > 0) {
+        let bestJ = 0; let bestC = -1;
+        for (let j = 0; j < 5; j++) {
+          const c = M.trans[cur * 5 + j];
+          if (c > bestC) { bestC = c; bestJ = j; }
+        }
+        next = { level: bestJ + 1, p: Math.round((bestC / total) * 100) / 100, samples: total };
+      }
+      // 稳态分布：无出边的行视为吸收态（概率留在原地）
+      let v = [0.2, 0.2, 0.2, 0.2, 0.2];
+      for (let it = 0; it < 60; it++) {
+        const nv = new Array(5).fill(0);
+        for (let i = 0; i < 5; i++) {
+          const rs = rowSum(i);
+          if (rs <= 0) { nv[i] += v[i]; continue; }
+          for (let j = 0; j < 5; j++) nv[j] += v[i] * (M.trans[i * 5 + j] / rs);
+        }
+        const s = nv.reduce((a, b) => a + b, 0) || 1;
+        v = nv.map((x) => x / s);
+      }
+      return {
+        samples: M.samples,
+        current: this.out.level,
+        next,
+        stationary: v.map((x) => Math.round(x * 100) / 100),
+        highRatio: Math.round((v[3] + v[4]) * 100),
+      };
     },
   };
 
