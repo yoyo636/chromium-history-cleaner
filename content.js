@@ -71,14 +71,23 @@
     return document.body;
   }
 
-  /* ============================ 内容类型检测 ============================ */
-  function detectType() {
-    const codes = document.querySelectorAll('pre, code').length;
-    const tables = document.querySelectorAll('table').length;
-    const paras = document.querySelectorAll('p').length;
-    if (codes > 8) return 'code';
-    if (tables > 3) return 'table';
-    if (paras > 20) return 'article';
+  /* ==================== 内容类型（Day2：统一由引擎判定） ====================
+   * 类型判定只应有一处真相：引擎里那套（DOM 结构 + 编辑器特征 + 文本体量 + 60s 缓存）。
+   * 这里直接读引擎结果；引擎缺失时退化为极简兜底，保证渲染属性仍有值。 */
+  let lastPageType = null;
+  function currentType() {
+    if (ENGINE && ENGINE.pageType) {
+      try {
+        lastPageType = ENGINE.pageType().type || 'generic';
+        return lastPageType;
+      } catch (_e) { /* 落到下面兜底 */ }
+    }
+    if (lastPageType) return lastPageType;
+    try {
+      if (document.querySelector('.monaco-editor, .CodeMirror, .cm-content, .view-lines')) return 'code';
+      if (document.querySelectorAll('table').length > 3) return 'table';
+      if (document.querySelectorAll('p').length > 20) return 'article';
+    } catch (_e) { /* 忽略异常 DOM */ }
     return 'generic';
   }
 
@@ -97,8 +106,7 @@
 
   function applyLevel(l) {
     const root = document.documentElement;
-    const type = detectType();
-    root.setAttribute('data-eyecare-type', type);
+    root.setAttribute('data-eyecare-type', currentType());
     if (!enabled || l <= 1) {
       root.removeAttribute('data-eyecare');
       hideTip();
@@ -212,6 +220,11 @@
       try { r = ENGINE.tick(); } catch (_e) { return; }
       targetLevel = r.level; // 供渐进使用
       runCoach(r.level);
+      // Day2/6：顺带把页面类型与引擎自诊断快照上报，供弹窗展示
+      let type = null;
+      let diag = null;
+      try { type = r.breakdown ? r.breakdown.pageType : null; } catch (_e) { type = null; }
+      try { diag = ENGINE.diagnostics ? ENGINE.diagnostics() : null; } catch (_e) { diag = null; }
       try {
         chrome.runtime.sendMessage({
           type: 'FATIGUE_REPORT',
@@ -221,6 +234,8 @@
             confidence: r.confidence,
             trend: r.trend,
             activeDeltaMs: ENGINE.activeDeltaSec(),
+            pageType: type || 'generic',
+            diagnostics: diag,
           },
         });
       } catch (_e) {
