@@ -16,6 +16,14 @@
   const HC = window.HC;
 
   const DEFAULT_BLOCKLIST = ['weibo.com', 'douyin.com', 'bilibili.com', 'zhihu.com', 'tieba.baidu.com', 'xiaohongshu.com'];
+  /* Day3：白名单模式默认许可站点（写作/文档/代码托管这类「主线」站点） */
+  const DEFAULT_ALLOWLIST = ['docs.google.com', 'github.com', 'stackoverflow.com', 'mail.google.com'];
+
+  /* Day5：分心原因（与 background.js 的 FOCUS_REASONS 保持一致） */
+  const REASONS = [
+    ['habit', '习惯性手滑'], ['need', '确实要查资料'], ['mood', '焦虑 / 想逃避'],
+    ['notify', '被通知勾走'], ['bored', '卡住换换脑子'],
+  ];
 
   function send(type, payload) {
     return new Promise((resolve) => {
@@ -78,6 +86,28 @@
     const timer = setInterval(tick, 1000);
     const pollTimer = setInterval(tick, 5000);
 
+    /* Day5：给「忍住 / 破戒」事件补一句原因（威胁评分会按此加权） */
+    function reasonRow(e) {
+      if (!e || (e.kind !== 'resist' && e.kind !== 'broke')) return null;
+      const row = HC.el('div', { class: 'reason-row' });
+      if (e.reason) {
+        const found = REASONS.find((r) => r[0] === e.reason);
+        row.appendChild(HC.el('span', { class: 'reason-done', text: '📝 ' + (found ? found[1] : e.reason) }));
+        return row;
+      }
+      row.appendChild(HC.el('span', { class: 'reason-ask', text: '当时是为什么？' }));
+      REASONS.forEach(([id, label]) => {
+        row.appendChild(HC.el('button', {
+          class: 'mini', text: label,
+          onclick: () => send('FOCUS_REASON', { t: e.t, host: e.host, reason: id }).then((r) => {
+            if (r.ok) { HC.toast('已记录：' + label, 'success'); tick(); }
+            else HC.toast(r.error || '记录失败', 'error');
+          }),
+        }));
+      });
+      return row;
+    }
+
     function renderRecent(recent) {
       list.innerHTML = '';
       if (!recent.length) {
@@ -87,19 +117,21 @@
       recent.forEach((e) => {
         const icon = e.kind === 'resist' ? '💪' : e.kind === 'broke' ? '❌' : '🔔';
         const label = e.kind === 'resist' ? '忍住' : e.kind === 'broke' ? '破戒' : '提醒';
-        list.appendChild(HC.el('div', { class: 'item' }, [
-          HC.el('div', { class: 'item-main' }, [
-            HC.el('div', { class: 'item-title', text: icon + ' ' + label + ' · ' + e.host }),
-            HC.el('div', { class: 'item-sub', text: new Date(e.t).toLocaleTimeString('zh-CN') + (e.dwellMs ? ' · 停留 ' + Math.round(e.dwellMs / 1000) + 's' : '') }),
-          ]),
-        ]));
+        const main = HC.el('div', { class: 'item-main' }, [
+          HC.el('div', { class: 'item-title', text: icon + ' ' + label + ' · ' + e.host }),
+          HC.el('div', { class: 'item-sub', text: new Date(e.t).toLocaleTimeString('zh-CN') + (e.dwellMs ? ' · 停留 ' + Math.round(e.dwellMs / 1000) + 's' : '') }),
+        ]);
+        const rr = reasonRow(e);
+        if (rr) main.appendChild(rr);
+        list.appendChild(HC.el('div', { class: 'item' }, [main]));
       });
     }
     renderRecent(st.recent || []);
 
     root.appendChild(
       HC.el('div', { class: 'row glass', style: 'flex-direction:column;align-items:center;gap:4px;padding:18px;' }, [
-        HC.el('div', { class: 'opt-name', text: '🎯 专注中（' + st.focus.minutes + ' 分钟' + (st.focus.pomodoro ? ' · 🍅' : '') + '）' }),
+        HC.el('div', { class: 'opt-name', text: '🎯 专注中（' + st.focus.minutes + ' 分钟'
+          + (st.mode === 'white' ? ' · 白名单' : ' · 黑名单') + (st.focus.pomodoro ? ' · 🍅' : '') + '）' }),
         remainEl,
         HC.el('div', { class: 'bar', style: 'width:100%;' }, [barFill]),
         statEl,
@@ -114,6 +146,40 @@
         onclick: () => send('FOCUS_END').then(() => HC.modules.focus.render(root.parentNode)),
       })
     );
+  }
+
+  /* ================= Day9：会话回放 =================
+   * 把一次会话的事件按「时间比例」铺成条带：横轴 = 会话时长，
+   * 绿=忍住 / 红=破戒 / 黄=提醒，条带宽度 = 停留时长。
+   * 纯 CSS 绝对定位实现，不引任何图表库。 */
+  const REPLAY_KIND = {
+    resist: { color: '#2c9d6b', label: '忍住' },
+    broke: { color: '#e5484d', label: '破戒' },
+    nudge: { color: '#c98a16', label: '提醒' },
+  };
+  function replayStrip(r) {
+    const evs = r.events || [];
+    const track = HC.el('div', { class: 'replay-track' });
+    const span = Math.max(1, r.end - r.start);
+    track.appendChild(HC.el('div', { class: 'replay-base' }));
+    if (!evs.length) {
+      track.appendChild(HC.el('div', { class: 'replay-none', text: '本会话无事件记录' }));
+      return track;
+    }
+    evs.forEach((e) => {
+      const meta = REPLAY_KIND[e.kind] || { color: '#5b6472', label: e.kind };
+      const left = Math.max(0, Math.min(100, ((e.t - r.start) / span) * 100));
+      const w = e.dwellMs ? Math.max(1.2, (e.dwellMs / span) * 100) : 1.2;
+      track.appendChild(HC.el('div', {
+        class: 'replay-seg',
+        style: `left:${left.toFixed(2)}%;width:${Math.min(w, 100 - left).toFixed(2)}%;background:${meta.color};`,
+        title: `${meta.label} · ${e.host}`
+          + (e.dwellMs ? ` · 停留 ${Math.round(e.dwellMs / 1000)}s` : '')
+          + (e.reason ? ` · ${(REASONS.find((x) => x[0] === e.reason) || [e.reason, e.reason])[1]}` : '')
+          + ` · ${new Date(e.t).toLocaleTimeString('zh-CN')}`,
+      }));
+    });
+    return track;
   }
 
   /* ================= 未开始 ================= */
@@ -133,32 +199,69 @@
 
     const pomodoroChk = HC.el('input', { type: 'checkbox' });
     pomodoroChk.checked = true;
-    const ta = HC.el('textarea', {
-      class: 'input', rows: '5',
-      style: 'width:100%;font-size:12px;line-height:1.6;',
-      spellcheck: 'false',
-    });
+
+    /* ---- Day3：两种拦截模式（黑名单正向 / 白名单反向） ---- */
+    let mode = 'black';
+    const ta = HC.el('textarea', { class: 'input', rows: '5', style: 'width:100%;font-size:12px;line-height:1.6;', spellcheck: 'false' });
+    const whiteTa = HC.el('textarea', { class: 'input', rows: '4', style: 'width:100%;font-size:12px;line-height:1.6;', spellcheck: 'false' });
+    const blockWrap = HC.el('div', {}, [
+      HC.el('div', { class: 'opt-name', style: 'font-size:13px;', text: '黑名单域名（每行一个，命中即分心）' }),
+      ta,
+    ]);
+    const allowWrap = HC.el('div', { style: 'display:none;' }, [
+      HC.el('div', { class: 'opt-name', style: 'font-size:13px;', text: '白名单域名（每行一个，只有这些算专注内）' }),
+      whiteTa,
+      HC.el('div', { class: 'opt-desc', style: 'margin-top:4px;', text: '白名单模式更严格：所有不在列表里的站点都会被提醒，停留超过 45 秒记破戒。写作 / 文档 / 代码托管建议放进来。' }),
+    ]);
+    const modeBlack = HC.el('button', { class: 'chip active', text: '🚫 黑名单模式' });
+    const modeWhite = HC.el('button', { class: 'chip', text: '✅ 白名单模式' });
+    const modeRow = HC.el('div', { class: 'presets', style: 'margin:6px 0;' }, [modeBlack, modeWhite]);
+    const modeHint = HC.el('div', { class: 'opt-desc', style: 'margin:4px 0 10px;' });
+    const goalSlot = HC.el('div', {}); // 每日目标行（异步填充，始终可见）
+    function syncMode() {
+      modeBlack.className = 'chip' + (mode === 'black' ? ' active' : '');
+      modeWhite.className = 'chip' + (mode === 'white' ? ' active' : '');
+      blockWrap.style.display = mode === 'black' ? '' : 'none';
+      allowWrap.style.display = mode === 'white' ? '' : 'none';
+      modeHint.textContent = mode === 'black'
+        ? '打开黑名单站点会温和提醒；45 秒内离开 = 忍住，否则记破戒。结束自动出报告。'
+        : '白名单模式：只有列表内的站点算专注内，其余一律提醒；45 秒内离开 = 忍住。';
+    }
+    modeBlack.onclick = () => { mode = 'black'; syncMode(); };
+    modeWhite.onclick = () => { mode = 'white'; syncMode(); };
 
     root.appendChild(
       HC.el('div', { class: 'row glass', style: 'display:block;padding:14px;' }, [
         HC.el('div', { class: 'opt-name', text: '🎯 专注模式' }),
-        HC.el('div', { class: 'opt-desc', style: 'margin:4px 0 10px;', text: '打开黑名单站点会温和提醒；45 秒内离开 = 忍住，否则记破戒。结束自动出报告。' }),
+        modeHint,
         HC.el('div', { class: 'opt-name', style: 'font-size:13px;', text: '专注时长' }),
         durSel,
         HC.el('label', { class: 'chk', style: 'display:flex;gap:6px;margin:8px 0;' }, [
           pomodoroChk, HC.el('span', { text: '🍅 番茄周期（完成后自动排 5 分钟短休，每 4 轮 15 分钟长休）' }),
         ]),
-        HC.el('div', { class: 'opt-name', style: 'font-size:13px;', text: '黑名单域名（每行一个）' }),
-        ta,
+        goalSlot,
+        HC.el('div', { class: 'opt-name', style: 'font-size:13px;', text: '拦截模式' }),
+        modeRow,
+        blockWrap,
+        allowWrap,
         HC.el('div', { style: 'height:10px;' }),
         HC.el('button', {
           class: 'btn btn-primary',
           text: '开始专注',
           onclick: async () => {
-            const blocklist = ta.value.split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean);
+            const norm = (v) => v.split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean);
+            const blocklist = norm(ta.value);
+            const allowlist = norm(whiteTa.value);
+            if (mode === 'white' && !allowlist.length) {
+              HC.toast('白名单模式至少需要一个允许域名', 'error');
+              return;
+            }
+            chrome.storage.local.set({ focusBlocklist: blocklist, focusAllowlist: allowlist });
             const r = await send('FOCUS_START', {
               minutes: parseInt(durSel.value, 10) || 25,
               blocklist,
+              allowlist,
+              mode,
               pomodoro: pomodoroChk.checked,
             });
             if (r.ok) { HC.toast('专注开始，加油！', 'success'); HC.modules.focus.render(root.parentNode); }
@@ -167,10 +270,12 @@
         }),
       ])
     );
+    syncMode();
 
-    // 载入黑名单 + 统计 + 每日目标
-    getStorage({ focusBlocklist: DEFAULT_BLOCKLIST, focusStats: null, focusReports: [], focusGoalMinutes: 60 }).then((s) => {
+    // 载入黑名单 / 白名单 + 统计 + 每日目标
+    getStorage({ focusBlocklist: DEFAULT_BLOCKLIST, focusAllowlist: DEFAULT_ALLOWLIST, focusStats: null, focusReports: [], focusGoalMinutes: 60 }).then((s) => {
       ta.value = (s.focusBlocklist || DEFAULT_BLOCKLIST).join('\n');
+      whiteTa.value = (s.focusAllowlist || DEFAULT_ALLOWLIST).join('\n');
 
       /* ---- Day1 增量：每日目标 + 进度条 ---- */
       const goal = s.focusGoalMinutes || 60;
@@ -194,13 +299,12 @@
         HC.modules.focus.render(root.parentNode);
       });
       goalRow.appendChild(goalIn);
-      root.insertBefore(goalRow, ta);
+      goalSlot.appendChild(goalRow);
 
       if (s.focusStats && (s.focusStats.completed || s.focusStats.streak)) {
-        root.insertBefore(
+        goalSlot.appendChild(
           HC.el('div', { class: 'opt-desc', style: 'margin:8px 0;', text:
-            `📊 累计完成番茄 ${s.focusStats.completed} 个 · 当前连续 ${s.focusStats.streak} 个` }),
-          ta
+            `📊 累计完成番茄 ${s.focusStats.completed} 个 · 当前连续 ${s.focusStats.streak} 个` })
         );
       }
     });
@@ -215,16 +319,25 @@
         threatList.appendChild(HC.el('div', { class: 'empty', text: '数据不足，多专注几次后会出现个性化建议' }));
         return;
       }
+      // Day7：把「此刻的时段风险」摆在明面上，用户能看懂分数为什么变高
+      const risk = r.data.currentRisk || 0;
+      const riskWord = risk >= 0.9 ? '深夜（自制力低谷）' : risk >= 0.6 ? '晚间' : risk >= 0.4 ? '过渡时段' : '工作时段';
+      threatList.appendChild(
+        HC.el('div', { class: 'opt-desc', style: 'margin:4px 0;', text:
+          `⏰ 现在是 ${r.data.nowHour} 点 · ${riskWord}（时段系数 ${risk}）——同一域名在深夜的威胁分会整体上浮。` })
+      );
       r.data.threats.forEach((t) => {
-        const btn = t.inList
-          ? HC.el('span', { class: 'mini', text: '✓ 已在名单', style: 'opacity:.6;' })
-          : HC.el('button', {
-            class: 'mini danger', text: '加入',
-            onclick: () => {
-              ta.value = (ta.value + '\n' + t.host).split('\n').map((x) => x.trim()).filter(Boolean).join('\n');
-              btn.textContent = '✓ 已加入';
-            },
-          });
+        const btn = mode === 'white'
+          ? HC.el('span', { class: 'mini', text: '✓ 白名单外已拦', style: 'opacity:.6;' })
+          : t.inList
+            ? HC.el('span', { class: 'mini', text: '✓ 已在名单', style: 'opacity:.6;' })
+            : HC.el('button', {
+              class: 'mini danger', text: '加入',
+              onclick: () => {
+                ta.value = (ta.value + '\n' + t.host).split('\n').map((x) => x.trim()).filter(Boolean).join('\n');
+                btn.textContent = '✓ 已加入';
+              },
+            });
         threatList.appendChild(
           HC.el('div', { class: 'item' }, [
             HC.el('div', { class: 'item-main' }, [
@@ -232,7 +345,10 @@
               HC.el('div', { class: 'bar', style: 'width:70%;' }, [
                 HC.el('div', { class: 'bar-fill', style: 'width:' + Math.round(t.threat * 100) + '%;background:' + (t.threat >= 0.7 ? 'var(--danger)' : t.threat >= 0.5 ? '#e8a33d' : 'var(--accent)') }),
               ]),
-              HC.el('div', { class: 'item-sub', text: `威胁分 ${t.threat} · 近 30 天 ${t.visits} 次 · 专注期提醒 ${t.temptations} 次` }),
+              HC.el('div', { class: 'item-sub', text:
+                `威胁分 ${t.threat} · 近 30 天 ${t.visits} 次 · 分心 ${t.temptations} 次`
+                + ` · 时段敏感 ${t.timeSens}` + (t.peakHour != null ? `（高峰 ${t.peakHour} 点）` : '')
+                + (t.nightShare >= 0.4 ? ` · 深夜占比 ${Math.round(t.nightShare * 100)}%` : '') }),
             ]),
             HC.el('div', { class: 'item-acts' }, [btn]),
           ])
@@ -241,21 +357,42 @@
     });
 
     /* ---------- 报告历史 ---------- */
-    getStorage({ focusReports: [] }).then((s) => {
+    getStorage({ focusReports: [], focusReasonStats: {} }).then((s) => {
       const reports = (s.focusReports || []).slice(-8).reverse();
       if (!reports.length) return;
       root.appendChild(HC.el('div', { class: 'section-subtitle', text: '历史报告（最近 8 次）' }));
       const list = HC.el('div', { class: 'list' });
       reports.forEach((r) => {
         const eff = Math.round((r.efficiency || 0) * 100);
-        list.appendChild(HC.el('div', { class: 'item' }, [
-          HC.el('div', { class: 'item-main' }, [
-            HC.el('div', { class: 'item-title', text: (r.completed ? '✅ ' : '⏹ ') + r.minutes + ' 分钟 · 效率 ' + eff + '%' }),
-            HC.el('div', { class: 'item-sub', text: `提醒 ${r.nudges} · 忍住 ${r.resisted} · 破戒 ${r.broken} · ${new Date(r.end).toLocaleString('zh-CN')}` }),
-          ]),
-        ]));
+        const main = HC.el('div', { class: 'item-main' }, [
+          HC.el('div', { class: 'item-title', text: (r.completed ? '✅ ' : '⏹ ') + r.minutes + ' 分钟 · 效率 ' + eff + '%' + (r.mode === 'white' ? ' · 白名单' : '') }),
+          HC.el('div', { class: 'item-sub', text: `提醒 ${r.nudges} · 忍住 ${r.resisted} · 破戒 ${r.broken} · ${new Date(r.end).toLocaleString('zh-CN')}` }),
+        ]);
+        main.appendChild(replayStrip(r)); // Day9
+        list.appendChild(HC.el('div', { class: 'item' }, [main]));
       });
       root.appendChild(list);
+
+      /* ---- Day5：分心原因分布 ---- */
+      const rs = s.focusReasonStats || {};
+      const rsKeys = Object.keys(rs).filter((k) => rs[k] > 0).sort((a, b) => rs[b] - rs[a]);
+      if (rsKeys.length) {
+        const totalR = rsKeys.reduce((a, k) => a + rs[k], 0);
+        root.appendChild(HC.el('div', { class: 'section-subtitle', text: '📝 分心原因分布（速记自事件流）' }));
+        root.appendChild(HC.el('div', { class: 'row glass', style: 'display:block;padding:12px;' },
+          rsKeys.map((k) => {
+            const label = (REASONS.find((x) => x[0] === k) || [k, k])[1];
+            const pct = Math.round((rs[k] / totalR) * 100);
+            return HC.el('div', { class: 'bar-row', title: label + ' ' + rs[k] + ' 次' }, [
+              HC.el('span', { class: 'bar-label', text: label }),
+              HC.el('div', { class: 'bar-track' }, [
+                HC.el('div', { class: 'bar-fill', style: `width:${Math.max(3, pct)}%;background:var(--accent);` }),
+              ]),
+              HC.el('span', { class: 'bar-val', text: rs[k] + ' 次' }),
+            ]);
+          })
+        ));
+      }
 
       /* ---- Day1 增量：周报聚合（近 7 天） ---- */
       const week = (s.focusReports || []).filter((r) => Date.now() - r.end <= 7 * 864e5);
