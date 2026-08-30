@@ -18,10 +18,13 @@
   let range = null; // [start, end] 时间戳；null 表示未查询
   let busy = false;
 
-  function parseDate(v) {
+  /* edge='start' → 当天 00:00:00.000；edge='end' → 当天 23:59:59.999
+   * 结束日期必须取当天末尾，否则选「到今天」时今天的记录落在范围外、删不掉。 */
+  function parseDate(v, edge) {
     if (!v) return null;
-    const d = new Date(v + 'T00:00:00');
-    return isNaN(d) ? null : d.getTime();
+    const d = new Date(v + (edge === 'end' ? 'T23:59:59.999' : 'T00:00:00.000'));
+    const t = d.getTime();
+    return isNaN(t) ? null : t;
   }
   function fmtDate(ts) {
     if (!ts) return '';
@@ -106,8 +109,8 @@
       function runSearch() {
         if (busy) return;
         // 空值处理：起始为空 → 0（最早）；结束为空 → 现在
-        let s = parseDate(startI.value);
-        let e = parseDate(endI.value);
+        let s = parseDate(startI.value, 'start');
+        let e = parseDate(endI.value, 'end');
         if (s == null) s = 0;
         if (e == null) e = Date.now();
         if (e <= s) return HC.toast('结束日期需晚于开始日期', 'warn');
@@ -261,6 +264,27 @@
         });
       }
 
+      /* 分块删除：一次并发几千条 sendMessage 会打满消息通道导致大面积失败，
+       * 改成每批 25 条并发、批次串行，并如实统计成功/失败条数。 */
+      const DEL_BATCH = 25;
+      async function deleteUrls(list) {
+        let okCount = 0;
+        let failCount = 0;
+        for (let i = 0; i < list.length; i += DEL_BATCH) {
+          const chunk = list.slice(i, i + DEL_BATCH);
+          const rs = await Promise.all(
+            chunk.map((x) =>
+              HC.callBackground('DELETE_URL', { url: x.url }).then(
+                () => true,
+                () => false
+              )
+            )
+          );
+          rs.forEach((r) => (r ? okCount++ : failCount++));
+        }
+        return { okCount, failCount };
+      }
+
       function delSelected() {
         const sel = filtered.filter((x) => x._sel);
         if (!sel.length) return HC.toast('请先勾选要删除的记录', 'warn');
@@ -268,15 +292,15 @@
           title: '删除选中的历史？',
           body: `将永久删除 <b>${sel.length}</b> 条历史记录，此操作<b>不可恢复</b>。`,
           danger: true,
-        }).then((ok) => {
+        }).then(async (ok) => {
           if (!ok) return;
-          HC.toast('正在删除…', 'info');
-          Promise.all(sel.map((x) => HC.callBackground('DELETE_URL', { url: x.url })))
-            .then(() => {
-              HC.toast(`已删除 ${sel.length} 条`, 'success');
-              runSearch();
-            })
-            .catch((e) => HC.toast('删除失败：' + e.message, 'error'));
+          HC.toast(`正在删除 ${sel.length} 条…`, 'info');
+          const { okCount, failCount } = await deleteUrls(sel);
+          HC.toast(
+            failCount ? `已删除 ${okCount} 条，${failCount} 条失败` : `已删除 ${okCount} 条`,
+            failCount ? 'warn' : 'success'
+          );
+          runSearch();
         });
       }
 
