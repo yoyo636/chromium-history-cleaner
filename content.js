@@ -174,13 +174,15 @@
     }
     return tipEl;
   }
+  // Day8：引擎给出的「针对性」休息建议（比通用文案有用，优先展示）
+  let lastAdvice = null;
   function showTip(level) {
     const msgs = {
       4: '👀 已连续阅读较久，试试远眺 20 秒',
       5: '😌 疲劳等级高，建议闭眼休息 1 分钟',
     };
     const tip = getTip();
-    tip.textContent = msgs[level] || '';
+    tip.textContent = (level >= 3 && lastAdvice) ? lastAdvice : (msgs[level] || '');
     tip.classList.add('show');
   }
   function hideTip() {
@@ -219,12 +221,15 @@
       let r;
       try { r = ENGINE.tick(); } catch (_e) { return; }
       targetLevel = r.level; // 供渐进使用
+      lastAdvice = r.advice || null; // Day8：针对性休息建议
       runCoach(r.level);
-      // Day2/6：顺带把页面类型与引擎自诊断快照上报，供弹窗展示
-      let type = null;
-      let diag = null;
+      // Day2/6/8/Backlog：把页面类型、自诊断、信号归因、马尔可夫预测一并上报给弹窗
+      let type = null, diag = null, mk = null;
       try { type = r.breakdown ? r.breakdown.pageType : null; } catch (_e) { type = null; }
-      try { diag = ENGINE.diagnostics ? ENGINE.diagnostics() : null; } catch (_e) { diag = null; }
+      try {
+        const sum = ENGINE.summary ? ENGINE.summary() : null;
+        if (sum) { diag = sum.diagnostics || null; mk = sum.markov || null; }
+      } catch (_e) { /* 摘要失败不影响主流程 */ }
       try {
         chrome.runtime.sendMessage({
           type: 'FATIGUE_REPORT',
@@ -236,6 +241,9 @@
             activeDeltaMs: ENGINE.activeDeltaSec(),
             pageType: type || 'generic',
             diagnostics: diag,
+            topSignal: r.topSignal || null,   // Day8
+            advice: r.advice || null,         // Day8
+            markov: mk,                       // Backlog
           },
         });
       } catch (_e) {
