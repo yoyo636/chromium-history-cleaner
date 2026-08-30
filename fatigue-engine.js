@@ -359,6 +359,85 @@
   const PROFILE_KEY = 'fatigueProfile';
   const SAVE_EVERY_MS = 600000; // 档案写盘节流 10 分钟
 
+  /* ---------- Day2 增量：内容类型自适应权重 ----------
+   * 动机：同样的信号在不同页面里含义相反。
+   *   - 代码页上「持续高速键入」是正常工作，不是硬撑；
+   *   - 长文页上「来回滚动」是扫读，不是漫无目的；
+   *   - 表格页上「频繁点击」是切筛选，不是躁动。
+   * 因此同一份信号在不同页面应走不同的权重表 + 不同的分级阈值。
+   *
+   * 两层调节：
+   *   ① PAGE_WEIGHTS      融合权重（各类信号在总分里的占比）
+   *   ② PAGE_SIGNAL_SCALE 信号折减（该类页面里「本就正常」的动作打折扣，
+   *                       折算后再进入几何融合，避免把工作节奏当成疲劳）
+   *   ③ PAGE_THRESHOLD_SHIFT 分级阈值偏移（持续专注型页面放宽升级条件）
+   */
+  const PAGE_WEIGHTS = {
+    code:    { mouse: 0.16, scroll: 0.16, key: 0.20, click: 0.06, video: 0.04, reading: 0.10, daze: 0.06 },
+    article: { mouse: 0.28, scroll: 0.26, key: 0.08, click: 0.08, video: 0.10, reading: 0.10, daze: 0.06 },
+    table:   { mouse: 0.24, scroll: 0.24, key: 0.12, click: 0.10, video: 0.06, reading: 0.06, daze: 0.06 },
+    generic: { mouse: 0.24, scroll: 0.20, key: 0.12, click: 0.08, video: 0.10, reading: 0.08, daze: 0.06 },
+  };
+  const PAGE_SIGNAL_SCALE = {
+    code:    { wander: 0.80, key: 0.60, click: 0.90, daze: 1.00 },
+    article: { wander: 0.70, key: 1.00, click: 1.00, daze: 1.10 },
+    table:   { wander: 0.85, key: 0.90, click: 0.70, daze: 1.00 },
+    generic: { wander: 1.00, key: 1.00, click: 1.00, daze: 1.00 },
+  };
+  // code 页持续专注最长，放宽最多；长文慢读次之；表格页轻微
+  const PAGE_THRESHOLD_SHIFT = { code: 3, article: 2, table: 1, generic: 0 };
+  const PAGE_CACHE_MS = 60000; // 页面类型检测缓存（DOM 扫描不必每 tick 都做）
+  const PAGE_SCAN_CAP = 400;   // 单类元素最多统计 400 个，防止超长页面卡顿
+
+  const PAGE_LABEL = { code: '代码', article: '长文', table: '表格', generic: '通用' };
+
+  /**
+   * 页面类型检测：DOM 结构特征 + 编辑器特征 + 文本体量，返回类型与判定依据。
+   * 判定顺序 code → table → article → generic（越具体的形态优先）。
+   */
+  function detectPageType() {
+    const d = { editor: false, codeNodes: 0, codeChars: 0, tables: 0, cells: 0, paras: 0, textChars: 0 };
+    try {
+      // ① 在线编辑器：命中即铁证（Monaco / CodeMirror / Ace / 高亮容器）
+      d.editor = !!document.querySelector(
+        '.monaco-editor, .CodeMirror, .cm-content, .cm-editor, .ace_editor, .view-lines, [data-mode-id]'
+      );
+      // ② 代码节点：数「块」不够（一行一 <code> 也会虚高），同时统计字符量
+      const codeNodes = document.querySelectorAll('pre, code');
+      d.codeNodes = codeNodes.length;
+      for (let i = 0; i < Math.min(codeNodes.length, PAGE_SCAN_CAP); i++) {
+        d.codeChars += (codeNodes[i].textContent || '').length;
+      }
+      // ③ 表格：单元格数比表格数更能区分「数据表」与「排版用 table」
+      const tables = document.querySelectorAll('table');
+      d.tables = tables.length;
+      for (let i = 0; i < Math.min(tables.length, 40); i++) {
+        d.cells += tables[i].querySelectorAll('td, th').length;
+      }
+      // ④ 长文：段落数 + 正文字符量
+      const paras = document.querySelectorAll('p');
+      d.paras = paras.length;
+      for (let i = 0; i < Math.min(paras.length, PAGE_SCAN_CAP); i++) {
+        d.textChars += (paras[i].textContent || '').length;
+      }
+    } catch (_e) { /* 极端 DOM 异常时按 generic 兜底 */ }
+
+    let type = 'generic';
+    let reason = '未匹配到明确形态';
+    if (d.editor || d.codeNodes > 8 || d.codeChars > 3000) {
+      type = 'code';
+      reason = d.editor ? '检测到在线代码编辑器'
+        : `代码块 ${d.codeNodes} 处 / ${d.codeChars} 字符`;
+    } else if (d.cells > 120 || d.tables > 3) {
+      type = 'table';
+      reason = `表格 ${d.tables} 个 / 单元格 ${d.cells} 个`;
+    } else if (d.paras > 20 || d.textChars > 3000) {
+      type = 'article';
+      reason = `正文 ${d.paras} 段 / ${d.textChars} 字符`;
+    }
+    return { type, reason, detail: d };
+  }
+
   const Engine = {
     // —— L1 信号状态 ——
     keyRate: new RateMeter(0.08),
@@ -539,19 +618,31 @@
       // 可用信号 → 贡献值 + 自适应权重（可用性 + 信号置信度）
       const parts = [];
       const push = (v, w) => { if (v != null) parts.push([v, w]); };
+      // Day2：页面类型检测（缓存 60s）→ 自适应权重表 + 信号折减
+      const nowP = Date.now();
+      if (!this.pageInfo || nowP - (this.pageTypeAt || 0) > PAGE_CACHE_MS) {
+        this.pageInfo = detectPageType();
+        this.pageType = this.pageInfo.type;
+        this.pageTypeAt = nowP;
+      }
+      const PW = PAGE_WEIGHTS[this.pageType] || PAGE_WEIGHTS.generic;
+      const PS = PAGE_SIGNAL_SCALE[this.pageType] || PAGE_SIGNAL_SCALE.generic;
       if (sig.mouse) {
         const m = [sig.mouse.slow, sig.mouse.tremor, sig.mouse.jerk].filter((x) => x != null);
-        if (m.length) push(m.reduce((a, b) => a + b, 0) / m.length, 0.24);
+        if (m.length) push(m.reduce((a, b) => a + b, 0) / m.length, PW.mouse);
       }
       if (sig.scroll) {
-        const s = [sig.scroll.slow, sig.scroll.wander].filter((x) => x != null);
-        if (s.length) push(s.reduce((a, b) => a + b, 0) / s.length, 0.20);
+        // wander 在该类页面里可能是正常动作（长文扫读 / 代码跳转），按类型折减
+        const slow = sig.scroll.slow;
+        const wander = sig.scroll.wander != null ? sig.scroll.wander * PS.wander : null;
+        const s = [slow, wander].filter((x) => x != null);
+        if (s.length) push(s.reduce((a, b) => a + b, 0) / s.length, PW.scroll);
       }
-      push(sig.key, 0.12);
-      push(sig.click, 0.08);
-      push(sig.video != null ? sig.video * 0.7 : null, 0.10);
-      push(sig.reading, 0.08);
-      push(sig.daze != null ? sig.daze * 0.6 : null, 0.06);
+      push(sig.key != null ? sig.key * PS.key : null, PW.key);
+      push(sig.click != null ? sig.click * PS.click : null, PW.click);
+      push(sig.video != null ? sig.video * 0.7 : null, PW.video);
+      push(sig.reading, PW.reading);
+      push(sig.daze != null ? sig.daze * 0.6 * PS.daze : null, PW.daze);
 
       // 行为信号几何融合
       let behavior = null;
@@ -601,10 +692,11 @@
       const mouseN = this.mouse.speed.n;
       const conf = clamp(0.25 + available * 0.09 + Math.min(mouseN, 400) / 400 * 0.25, 0, 1);
 
-      // 迟滞分级
+      // 迟滞分级（Day2：阈值按页面类型偏移，code 页放宽 3 分）
       const F = this.out.slow; // 用慢 EMA 做分级基准
       const T = this.out.trend;
-      const th = [15, 35, 55, 75];
+      const shift = PAGE_THRESHOLD_SHIFT[this.pageType] || 0;
+      const th = [15 + shift, 35 + shift, 55 + shift, 75 + shift];
       let target = 1;
       for (let i = th.length - 1; i >= 0; i--) if (F >= th[i]) { target = i + 2; break; }
       // 升级需持续 30s
@@ -626,6 +718,10 @@
         confidence: Math.round(conf * 100) / 100,
         trend: Math.round(T * 10) / 10,
         breakdown: {
+          pageType: this.pageType || 'generic',
+          pageTypeLabel: PAGE_LABEL[this.pageType] || PAGE_LABEL.generic,
+          pageTypeReason: this.pageInfo ? this.pageInfo.reason : '',
+          thresholdShift: shift,
           task: Math.round(task * 100) / 100,
           circadian: Math.round(circ * 100) / 100,
           activeMin: Math.round(activeMin * 10) / 10,
@@ -639,6 +735,63 @@
             reading: sig.reading, daze: sig.daze,
           },
         },
+      };
+    },
+
+    /* ---------- Day6 增量：引擎自诊断 ----------
+     * 检查各信号估计器的健康度：
+     *   cold       样本不足（n < 12），基线尚未建立
+     *   ok         正常工作
+     *   degenerate 方差塌缩（std < 1e-4 且样本充足）——该信号失去区分度，
+     *              融合时应视为不可用（由调用方按 status 过滤）
+     * 输出用于弹窗「引擎状态」展示与保存到档案，方便排查误判来源。 */
+    diagnostics() {
+      const W = this.profile.welford;
+      const check = (name, w) => {
+        const std = w.std;
+        let status = 'ok';
+        if (w.n < 12) status = 'cold';
+        else if (std < 1e-4) status = 'degenerate';
+        return { name, n: w.n, mean: Math.round(w.mean * 1000) / 1000, std: Math.round(std * 10000) / 10000, status };
+      };
+      const signals = [
+        check('keyRate', W.keyRate),
+        check('clickRate', W.clickRate),
+        check('scrollSpeed', W.scrollSpeed),
+        check('mouseSpeed', W.mouseSpeed),
+        check('mouseReversal', W.mouseReversal),
+        check('keyGap', W.keyGap),
+      ];
+      const p2 = {
+        speedSlow: { n: this.profile.p2.speedSlow.count(), ready: this.profile.p2.speedSlow.value() != null },
+        reversal: { n: this.profile.p2.reversal.count(), ready: this.profile.p2.reversal.value() != null },
+      };
+      const okCount = signals.filter((s) => s.status === 'ok').length;
+      return {
+        signals,
+        p2,
+        health: okCount >= 4 ? 'good' : okCount >= 2 ? 'warming' : 'cold',
+        pageType: this.pageType || 'generic',
+      };
+    },
+
+    /* ---------- Day2：页面类型信息（供 content.js 渲染与弹窗展示） ----------
+     * 复用缓存的判定结果，避免重复 DOM 扫描；缓存过期时顺带刷新。 */
+    pageTypeInfo() {
+      const nowP = Date.now();
+      if (!this.pageInfo || nowP - (this.pageTypeAt || 0) > PAGE_CACHE_MS) {
+        this.pageInfo = detectPageType();
+        this.pageType = this.pageInfo.type;
+        this.pageTypeAt = nowP;
+      }
+      return {
+        type: this.pageType,
+        label: PAGE_LABEL[this.pageType] || PAGE_LABEL.generic,
+        reason: this.pageInfo.reason,
+        detail: this.pageInfo.detail,
+        weights: PAGE_WEIGHTS[this.pageType] || PAGE_WEIGHTS.generic,
+        scale: PAGE_SIGNAL_SCALE[this.pageType] || PAGE_SIGNAL_SCALE.generic,
+        thresholdShift: PAGE_THRESHOLD_SHIFT[this.pageType] || 0,
       };
     },
 
@@ -686,6 +839,7 @@
         baselineReady: this.profile.welford.mouseSpeed.n >= 60,
         calibratedSamples: this.profile.welford.mouseSpeed.n,
         prediction: this.predict(),
+        diagnostics: this.diagnostics(),
       };
     },
 
@@ -695,7 +849,9 @@
      * 等效时间常数差），启发式换算为每分钟点数；趋势为负则返回 null。
      * 这是启发式投影，置信度低时输出 null。 */
     predict() {
-      const th = [15, 35, 55, 75];
+      // Day2：与分级保持一致，阈值按当前页面类型偏移
+      const shift = PAGE_THRESHOLD_SHIFT[this.pageType] || 0;
+      const th = [15 + shift, 35 + shift, 55 + shift, 75 + shift];
       const F = this.out.slow;
       const slopePerMin = Math.max(0, this.out.trend) / 1.5; // 启发式：EMA 差 → 每分钟点数
       if (slopePerMin < 0.15) return null;
@@ -730,6 +886,8 @@
     heartbeat: () => Engine.heartbeat(),
     activeDeltaSec: () => Engine.activeDeltaMs(),
     summary: () => Engine.summary(),
+    pageType: () => Engine.pageTypeInfo(),
+    diagnostics: () => Engine.diagnostics(),
     resetCalibration: () => Engine.resetProfile(),
     ready: true,
   };
