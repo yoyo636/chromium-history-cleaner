@@ -394,9 +394,14 @@ function checkLink(url) {
  *   lastScore: number,
  *   date: 'YYYY-MM-DD',        // 当日标记（跨天自动重置曲线）
  *   updatedAt: number
+ *   lastPageType: 'code'|'article'|'table'|'generic'   // Day2：最近一次页面类型
+ *   pageTypeMinutes: {code,article,table,generic}      // Day2：按类型累计高强度分钟
+ *   diagnostics: {...}                                 // Day6：引擎自诊断快照
  * }
  * ------------------------------------------------------------------------- */
 const FATIGUE_BUCKET_MS = 10 * 60000;
+// Day2：页面类型白名单（上报值需校验后入库，脏数据一律按 generic 处理）
+const PAGE_TYPES = ['code', 'article', 'table', 'generic'];
 
 function fatigueDate(ts) {
   const d = new Date(ts);
@@ -417,6 +422,7 @@ function handleFatigueReport(payload) {
           log: [],
           minutes: 0,
           date: today,
+          pageTypeMinutes: { code: 0, article: 0, table: 0, generic: 0 },
         };
       }
       ec.log = ec.log || [];
@@ -432,6 +438,13 @@ function handleFatigueReport(payload) {
       ec.lastLevel = payload.level;
       ec.lastScore = payload.score;
       ec.updatedAt = now;
+      // Day2：按页面类型累计高强度分钟（弹窗展示「今天的时间花在哪类页面上」）
+      const pt = PAGE_TYPES.indexOf(payload.pageType) >= 0 ? payload.pageType : 'generic';
+      ec.lastPageType = pt;
+      if (!ec.pageTypeMinutes) ec.pageTypeMinutes = { code: 0, article: 0, table: 0, generic: 0 };
+      ec.pageTypeMinutes[pt] = (ec.pageTypeMinutes[pt] || 0) + (payload.activeDeltaMs || 0) / 60;
+      // Day6：引擎自诊断快照（各信号样本量 / 方差塌缩 / 健康度）
+      if (payload.diagnostics) ec.diagnostics = payload.diagnostics;
 
       chrome.storage.local.set({ eyecare: ec }, () => {
         updateFatigueBadge(payload.level);
