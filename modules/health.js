@@ -1,8 +1,9 @@
 /* -------------------------------------------------------------------------
  * modules/health.js — 浏览器健康分
- * 五个分项加权合成 0-100 分：
- *   标签(25%) 历史(20%) 下载(15%) 护眼(20%) 隐私(20%)
- * 全部本地计算：tabs / history / downloads / storage(eyecare, privacyMode)
+ * 六个分项加权合成 0-100 分：
+ *   标签(20%) 历史(18%) 下载(12%) 护眼(18%) 隐私(12%) 专注纪律(20%)
+ * 全部本地计算：tabs / history / downloads /
+ *               storage(eyecare, privacyMode, focusReports, focusGoalMinutes)
  * ------------------------------------------------------------------------- */
 
 'use strict';
@@ -24,6 +25,25 @@
     return min <= 60 ? 100 : clamp(100 - (min - 60) / 2.4);                    // 300 分钟 → 0
   }
   function scorePrivacy(mode) { return mode === 'shield' ? 100 : 60; }
+
+  /* Day10：专注纪律 —— 忍住率 60% + 目标完成率 40%
+   * 忍住率 = 忍住 / (忍住 + 破戒)，没有分心样本时按满分计（全程无分心当然满分）；
+   * 目标完成率 = 近 7 天完成的专注分钟 / (每日目标 × 7)，封顶 100%。 */
+  function scoreFocus(reports, goal) {
+    const week = (reports || []).filter((r) => Date.now() - r.end <= 7 * 864e5);
+    if (!week.length) return { score: 70, desc: '近 7 天还没有专注记录（给中性分）' };
+    const resist = week.reduce((a, r) => a + (r.resisted || 0), 0);
+    const broke = week.reduce((a, r) => a + (r.broken || 0), 0);
+    const winRate = resist + broke ? resist / (resist + broke) : null;
+    const doneMin = week.reduce((a, r) => a + (r.completed ? r.minutes : 0), 0);
+    const target = Math.max(1, (goal || 60) * 7);
+    const goalRate = Math.min(1, doneMin / target);
+    const wr = winRate == null ? 1 : winRate;
+    const score = clamp(100 * (0.6 * wr + 0.4 * goalRate));
+    const desc = `近 7 天专注 ${Math.round(doneMin)} / ${Math.round(target)} 分钟`
+      + (winRate == null ? ' · 期间没有分心记录' : ` · 忍住率 ${Math.round(winRate * 100)}%（${resist} 胜 / ${broke} 败）`);
+    return { score, desc };
+  }
 
   HC.modules.health = {
     render(container) {
@@ -56,23 +76,27 @@
         hero.innerHTML = '';
         hero.appendChild(HC.el('div', { class: 'opt-name', text: '评估中…' }));
 
-        const [tabs, hist, dls, ey] = await Promise.all([
+        const [tabs, hist, dls, ey, fs] = await Promise.all([
           new Promise((r) => chrome.tabs.query({}, (t) => r(t || []))),
           countSearch(chrome.history.search.bind(chrome.history),
             { text: '', startTime: Date.now() - 7 * 864e5, endTime: Date.now(), maxResults: 5000 }),
           countSearch(chrome.downloads.search.bind(chrome.downloads), { limit: 500 }),
           new Promise((r) => chrome.storage.local.get({ eyecare: null, privacyMode: 'monitor' }, (x) => r(x))),
+          new Promise((r) => chrome.storage.local.get({ focusReports: [], focusGoalMinutes: 60 }, (x) => r(x))),
         ]);
 
         const eyeMin = ey.eyecare && typeof ey.eyecare.minutes === 'number' ? ey.eyecare.minutes : null;
+        const fr = scoreFocus(fs.focusReports, fs.focusGoalMinutes); // Day10
         const comps = [
           ['标签', scoreTabs(tabs.length), '当前打开 ' + tabs.length + ' 个标签（8 个以内满分）'],
           ['历史', scoreHistory(hist.length), '近 7 天 ' + hist.length + ' 条记录（500 条内满分）'],
           ['下载', scoreDownloads(dls.length), dls.length + ' 条下载记录堆积（可到「下载」页清理）'],
           ['护眼', scoreEyes(eyeMin), eyeMin == null ? '暂无今日护眼数据' : '今日高强度用眼 ' + eyeMin + ' 分钟'],
           ['隐私', scorePrivacy(ey.privacyMode), ey.privacyMode === 'shield' ? '指纹加固已开启' : '指纹加固未开启（可在「隐私防护」开启）'],
+          ['专注纪律', fr.score, fr.desc],
         ];
-        const weights = [0.25, 0.2, 0.15, 0.2, 0.2];
+        // 六项权重合计 1.0（原五项各让出一部分给「专注纪律」）
+        const weights = [0.2, 0.18, 0.12, 0.18, 0.12, 0.2];
         const total = clamp(comps.reduce((s, c, i) => s + c[1] * weights[i], 0));
         const grade = total >= 85 ? '优' : total >= 70 ? '良' : total >= 50 ? '中' : '差';
         const gcolor = total >= 85 ? 'var(--success)' : total >= 70 ? 'var(--accent)' : total >= 50 ? '#e8a33d' : 'var(--danger)';
@@ -93,6 +117,7 @@
           下载: '到「下载」页移除无用下载记录（不会删除文件本身）。',
           护眼: '休息一下！离开屏幕 5 分钟，或在「护眼助手」查看今日疲劳曲线。',
           隐私: '到「隐私防护」开启指纹加固。',
+          专注纪律: '到「专注模式」开一次 25 分钟番茄；分心后 45 秒内离开就算「忍住」，能拉高这项分。',
         };
         let any = false;
         comps.forEach((c) => {
