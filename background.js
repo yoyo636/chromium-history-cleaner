@@ -342,6 +342,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       handleFocusState(reply);
       return true;
 
+    /* Day5：分心原因速记 —— 给最近一次 resist/broke 事件补记原因 */
+    case 'FOCUS_REASON':
+      handleFocusReason(payload, reply);
+      return true;
+
     case 'FOCUS_THREATS':
       handleFocusThreats(reply);
       return true;
@@ -412,10 +417,27 @@ function fatigueDate(ts) {
 function handleFatigueReport(payload) {
   return new Promise((resolve) => {
     const now = Date.now();
-    chrome.storage.local.get({ eyecare: null }, (r) => {
+    chrome.storage.local.get({ eyecare: null, eyecareHistory: [] }, async (r) => {
       let ec = r.eyecare;
       const today = fatigueDate(now);
       if (!ec || ec.date !== today) {
+        /* Day4：跨天时先把昨日曲线汇总成「日画像」，供周级统计（μ/σ + 离群日） */
+        let hist = (r.eyecareHistory || []).slice();
+        if (ec && ec.date && (ec.log || []).length) {
+          const scores = (ec.log || []).map((p) => p.score).filter((s) => typeof s === 'number');
+          if (scores.length) {
+            hist.push({
+              date: ec.date,
+              minutes: Math.round(ec.minutes || 0),
+              avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 10) / 10,
+              max: Math.max(...scores),
+              samples: scores.length,
+            });
+            // 保留约两个月：必须用切片收敛，只 shift 一次的话长度会卡在超限的旧值上
+            if (hist.length > 60) hist = hist.slice(-60);
+          }
+        }
+        await new Promise((res) => chrome.storage.local.set({ eyecareHistory: hist }, res));
         // 跨天重置曲线（保留开关）
         ec = {
           enabled: ec ? ec.enabled !== false : true,
@@ -445,6 +467,11 @@ function handleFatigueReport(payload) {
       ec.pageTypeMinutes[pt] = (ec.pageTypeMinutes[pt] || 0) + (payload.activeDeltaMs || 0) / 60;
       // Day6：引擎自诊断快照（各信号样本量 / 方差塌缩 / 健康度）
       if (payload.diagnostics) ec.diagnostics = payload.diagnostics;
+      // Day8：本次的主要贡献信号与针对性休息建议
+      if (payload.topSignal) ec.lastTopSignal = payload.topSignal;
+      if (payload.advice != null) ec.lastAdvice = payload.advice;
+      // Backlog：马尔可夫链（下一等级预测 + 稳态分布）
+      if (payload.markov) ec.markov = payload.markov;
 
       chrome.storage.local.set({ eyecare: ec }, () => {
         updateFatigueBadge(payload.level);
@@ -1173,17 +1200,82 @@ const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const focusNudgeAt = {};    // host -> 上次提醒时间
 const focusNudgeN = {};     // host -> 本次会话提醒次数（习惯化计数）
-const focusDwell = {};      // tabId -> {host, since}  评估中的黑名单访问
+const focusDwell = {};      // tabId -> {host, since}  评估中的分心访问
 const FOCUS_DWELL_MS = 45000;
+
+/* ---- Backlog：强化学习式提醒时机（reward = 忍住率） ----
+ * 观察：很多分心是「手滑点进去、自己两秒就退出来」，提醒反而打扰。
+ * 策略：给每个 host 学一个「提醒延迟」 delay ∈ [0,60s]。
+ *   - 未提醒就自己离开（resist 且 pending 未触发）→ reward +1 → delay +5s（多给自我纠正的机会）
+ *   - 提醒过仍然破戒（broke 且已触发）          → reward −1 → delay −10s（下次更早拦）
+ * 初始 0s（立即提醒），随数据自适应。 */
+const focusPending = {};    // tabId -> {host, since, timer, fired}
+let focusNudgeDelay = {};   // host -> 延迟毫秒（持久化到 focusPolicy.delays）
+const NUDGE_DELAY_MIN = 0;
+const NUDGE_DELAY_MAX = 60000;
+
+/* ---- Day7：时段敏感性 ----
+ * 同一域名在深夜 vs 工作时段的「杀伤力」不同：深夜刷短视频比午后更致命。
+ * 为每个域名维护 24 小时直方图，用「时段风险加权均值」刻画其高危程度。 */
+let focusHostHours = {};    // host -> number[24]
+function hourRisk(h) {
+  if (h >= 23 || h <= 4) return 1.00;   // 深夜：自制力最低
+  if (h >= 20) return 0.65;             // 晚间
+  if (h >= 9 && h <= 18) return 0.30;   // 工作时段：相对可控
+  return 0.45;                          // 清晨/傍晚过渡
+}
+
+/* ---- Day5：分心原因（速记） ---- */
+const FOCUS_REASONS = [
+  { id: 'habit', label: '习惯性手滑' },
+  { id: 'need', label: '确实要查资料' },
+  { id: 'mood', label: '焦虑 / 想逃避' },
+  { id: 'notify', label: '被通知勾走' },
+  { id: 'bored', label: '卡住了想换换脑子' },
+];
 
 const FOCUS_NUDGE_MSGS = [
   '正在专注中，这个站点先放一放？',
-  '「{host}」在黑名单里，剩余 {min} 分钟。深呼吸，回去！',
+  '「{host}」在名单里，剩余 {min} 分钟。深呼吸，回去！',
   '刚刚才专注没多久，别让 {host} 打断你。',
   '再坚持 {min} 分钟，今天的你就赢了昨天的你。',
   '提醒：你正在专注模式里。{host} 可以稍后再看。',
   '忍一次是一次 —— {host} 已被记录。',
 ];
+/* 白名单模式专用文案（语气不同：不是「禁止」，而是「不在此次许可内」） */
+const FOCUS_NUDGE_MSGS_WHITE = [
+  '这个站点不在本次专注的白名单里，先回主线？',
+  '「{host}」未获许可，剩余 {min} 分钟。',
+  '白名单模式：只有列出来的站点才算专注内。',
+  '还剩 {min} 分钟，回到白名单站点上去吧。',
+  '提醒：白名单模式下「{host}」会被记为分心。',
+  '先记下来，专注结束再看 {host}。',
+];
+
+/* ---------- Day3：命中判定（黑名单正向 / 白名单反向） ---------- */
+function hostMatches(host, list) {
+  return list.some((d) => host === d || host.endsWith('.' + d));
+}
+/** 是否算「分心」：黑名单模式 = 命中即分心；白名单模式 = 不在列表内即分心 */
+function isDistracting(host, focus) {
+  if (!host) return false;
+  const lower = (arr) => (arr || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  if (focus.mode === 'white') {
+    const allow = lower(focus.allowlist);
+    if (!allow.length) return false;      // 白名单为空则退化：不做任何拦截（保险）
+    return !hostMatches(host, allow);
+  }
+  return hostMatches(host, lower(focus.blocklist));
+}
+
+/* ---------- 启动：载入持久化的 RL 策略与时段直方图 ---------- */
+(async function loadFocusPolicy() {
+  try {
+    const s = await focusGet({ focusPolicy: null, focusHostHours: null });
+    if (s.focusPolicy && s.focusPolicy.delays) focusNudgeDelay = s.focusPolicy.delays || {};
+    if (s.focusHostHours) focusHostHours = s.focusHostHours || {};
+  } catch (_e) { /* 首次运行无数据 */ }
+})();
 
 function focusHostOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_e) { return ''; }
@@ -1199,18 +1291,81 @@ function focusNotify(title, message) {
   try { chrome.notifications.create({ type: 'basic', title, message }); } catch (_e) { /* 忽略 */ }
 }
 
+/** 追加一条专注事件（统一上限 200 条，避免 storage 膨胀） */
+async function pushFocusEvent(ev) {
+  const { focusEvents } = await focusGet({ focusEvents: [] });
+  const list = (focusEvents || []).concat([ev]).slice(-200);
+  await focusSet({ focusEvents: list });
+  return list;
+}
+
+/** 关闭并清理某个标签页上待触发的提醒 */
+function clearPending(tabId) {
+  const p = focusPending[tabId];
+  if (p && p.timer) clearTimeout(p.timer);
+  delete focusPending[tabId];
+}
+
+/* ---------- Backlog：RL 策略更新（reward ∈ {+1, −1}） ---------- */
+async function updateNudgePolicy(host, reward) {
+  const cur = focusNudgeDelay[host] || 0;
+  const next = clamp(cur + (reward > 0 ? 5000 : -10000), NUDGE_DELAY_MIN, NUDGE_DELAY_MAX);
+  if (next === cur) return cur;
+  focusNudgeDelay[host] = next;
+  const { focusPolicy } = await focusGet({ focusPolicy: null });
+  await focusSet({ focusPolicy: { ...(focusPolicy || {}), delays: focusNudgeDelay } });
+  return next;
+}
+
+/* ---------- Day7：记录该域名的分心时段 ---------- */
+async function bumpHostHour(host, hour) {
+  const arr = focusHostHours[host] || new Array(24).fill(0);
+  arr[hour] = (arr[hour] || 0) + 1;
+  focusHostHours[host] = arr;
+  await focusSet({ focusHostHours });
+}
+
+/* ---------- Day5：分心原因速记 ---------- */
+async function handleFocusReason(payload, reply) {
+  const t = payload && payload.t;
+  const host = payload && payload.host;
+  const reason = payload && payload.reason;
+  if (!t || !host || !reason) return reply(false, null, '参数不完整');
+  const { focusEvents, focusReasonStats } = await focusGet({ focusEvents: [], focusReasonStats: {} });
+  const list = focusEvents || [];
+  // 定位：同一 host、时间差 2s 内、且是 resist/broke 的最近一条
+  let idx = -1;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i];
+    if (e.host === host && (e.kind === 'resist' || e.kind === 'broke') && Math.abs(e.t - t) < 2000) { idx = i; break; }
+  }
+  if (idx < 0) return reply(false, null, '未找到对应事件');
+  list[idx].reason = reason;
+  const stats = focusReasonStats || {};
+  stats[reason] = (stats[reason] || 0) + 1;
+  await focusSet({ focusEvents: list, focusReasonStats: stats });
+  reply(true, { ok: true, reason, stats });
+}
+
 /* ---------- 开始专注 ---------- */
 async function handleFocusStart(payload, reply) {
   const minutes = clamp(Math.round(payload.minutes || 25), 5, 240);
   const blocklist = (payload.blocklist || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  const allowlist = (payload.allowlist || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
   const pomodoro = !!payload.pomodoro;
+  // Day3：白名单模式 —— 只有列表内的站点算「专注内」，其余一律按分心评估
+  const mode = payload.mode === 'white' ? 'white' : 'black';
+  if (mode === 'white' && !allowlist.length) {
+    return reply(false, null, '白名单模式需要至少一个允许域名，否则会把所有页面都判为分心');
+  }
   const start = Date.now();
   await focusSet({
-    focus: { start, until: start + minutes * 60000, minutes, blocklist, pomodoro },
+    focus: { start, until: start + minutes * 60000, minutes, blocklist, allowlist, mode, pomodoro },
     focusEvents: [], // 新会话清空事件
   });
   for (const k of Object.keys(focusNudgeAt)) delete focusNudgeAt[k];
   for (const k of Object.keys(focusNudgeN)) delete focusNudgeN[k];
+  for (const k of Object.keys(focusPending)) clearPending(k);
   try {
     chrome.alarms.create('hc-focus-end', { when: start + minutes * 60000 });
     chrome.action.setBadgeText({ text: String(minutes) });
@@ -1221,7 +1376,7 @@ async function handleFocusStart(payload, reply) {
 
 /* ---------- 当前状态（弹窗轮询） ---------- */
 async function handleFocusState(reply) {
-  const { focus, focusEvents } = await focusGet({ focus: null, focusEvents: [] });
+  const { focus, focusEvents, focusReasonStats } = await focusGet({ focus: null, focusEvents: [], focusReasonStats: {} });
   if (!focus) {
     const suggestion = await suggestNextMinutes();
     return reply(true, { active: false, suggestion });
@@ -1240,6 +1395,8 @@ async function handleFocusState(reply) {
     resisted: ev.filter((e) => e.kind === 'resist').length,
     broken: ev.filter((e) => e.kind === 'broke').length,
     recent: ev.slice(-12).reverse(),
+    mode: focus.mode || 'black',           // Day3
+    reasonStats: focusReasonStats || {},   // Day5
   });
 }
 
@@ -1257,24 +1414,51 @@ async function handleFocusThreats(reply) {
     visits[h] = (visits[h] || 0) + (it.visitCount || 1);
     lastSeen[h] = Math.max(lastSeen[h] || 0, it.lastVisitTime || 0);
   }
-  const tempt = {}; // host -> 专注期提醒次数（含历史会话）
-  (focusEvents || []).forEach((e) => { if (e.host) tempt[e.host] = (tempt[e.host] || 0) + 1; });
+  const tempt = {}; // host -> 专注期犯戒加权分（含历史会话）
+  // Day5：主动登记过分心原因的事件可信度更高（用户确认了这次是分心），权重 ×1.25
+  (focusEvents || []).forEach((e) => {
+    if (!e.host) return;
+    tempt[e.host] = (tempt[e.host] || 0) + (e.reason ? 1.25 : 1);
+  });
   const maxV = Math.max(1, ...Object.values(visits));
   const now = Date.now();
+  const nowHour = new Date().getHours();
+  const currentRisk = hourRisk(nowHour);           // Day7：此刻的时段风险
   const threats = Object.keys(visits)
     .filter((h) => h && !h.startsWith('chrome') && visits[h] >= 5)
     .map((h) => {
       const v = visits[h] / maxV;                                   // 频次 0-1
       const t = clamp((tempt[h] || 0) / 6, 0, 1);                   // 犯戒史 0-1
       const recency = clamp01(1 - (now - (lastSeen[h] || 0)) / (30 * 864e5)); // 新近度
-      const threat = 0.5 * v + 0.3 * t + 0.2 * recency;
-      return { host: h, visits: visits[h], temptations: tempt[h] || 0, threat: Math.round(threat * 100) / 100 };
+      /* Day7：时段敏感性 —— 该域名的分心事件集中在什么时段发生 */
+      const hist = focusHostHours[h];
+      let timeSens = 0.5;  // 无数据取中性
+      let peakHour = null;
+      let nightShare = 0;
+      if (hist) {
+        const total = hist.reduce((a, b) => a + b, 0);
+        if (total > 0) {
+          timeSens = hist.reduce((a, c, i) => a + c * hourRisk(i), 0) / total;
+          peakHour = hist.indexOf(Math.max(...hist));
+          nightShare = (hist[23] + hist[0] + hist[1] + hist[2] + hist[3] + hist[4]) / total;
+        }
+      }
+      // 一阶：结构分（频次/犯戒/新近/时段），二阶：乘上「此刻」的时段风险
+      const base = 0.45 * v + 0.25 * t + 0.15 * recency + 0.15 * timeSens;
+      const threat = clamp01(base * (0.85 + 0.30 * currentRisk));
+      return {
+        host: h, visits: visits[h],
+        temptations: Math.round((tempt[h] || 0) * 10) / 10,
+        timeSens: Math.round(timeSens * 100) / 100,
+        peakHour, nightShare: Math.round(nightShare * 100) / 100,
+        threat: Math.round(threat * 100) / 100,
+      };
     })
     .filter((x) => x.threat >= 0.35)
     .sort((a, b) => b.threat - a.threat)
     .slice(0, 12)
     .map((x) => ({ ...x, inList: list.includes(x.host) }));
-  reply(true, { threats, inFocus: !!focus });
+  reply(true, { threats, inFocus: !!focus, currentRisk, nowHour });
 }
 
 /* ---------- 标签检查：状态机 + 自适应提醒 ---------- */
@@ -1284,9 +1468,8 @@ async function focusCheckTab(tab) {
   if (!focus || focus.until <= Date.now()) return;
   const host = focusHostOf(tab.url);
   if (!host) return;
-  const list = (focus.blocklist || []).map((s) => String(s).trim().toLowerCase());
-  const hit = list.some((d) => host === d || host.endsWith('.' + d));
-  if (!hit) return;
+  // Day3：黑名单模式命中即分心；白名单模式「不在列表内」即分心
+  if (!isDistracting(host, focus)) { clearPending(tab.id); return; }
 
   const now = Date.now();
   // 状态机：标记「评估中」的访问
@@ -1294,21 +1477,35 @@ async function focusCheckTab(tab) {
     focusDwell[tab.id] = { host, since: now };
   }
 
+  // 该标签页已排程提醒（含 RL 延迟等待中）→ 不再重复排
+  if (focusPending[tab.id] && focusPending[tab.id].host === host) return;
+
   // 自适应提醒间隔：90s × 1.35^n，封顶 5 分钟
   const n = focusNudgeN[host] || 0;
   const interval = Math.min(90000 * Math.pow(1.35, n), 300000);
   if (focusNudgeAt[host] && now - focusNudgeAt[host] < interval) return;
+
+  // Backlog：RL 延迟 —— 先等 delay 毫秒，若用户自己离开则不必打扰
+  const delay = focusNudgeDelay[host] || 0;
+  clearPending(tab.id);
+  const rec = { host, since: now, fired: false, timer: null };
+  rec.timer = setTimeout(() => { rec.fired = true; delete focusPending[tab.id]; fireNudge(host); }, delay);
+  focusPending[tab.id] = rec;
+}
+
+/* 实际发出提醒（RL 延迟结束后调用） */
+async function fireNudge(host) {
+  const { focus } = await focusGet({ focus: null });
+  if (!focus || focus.until <= Date.now()) return;
+  const now = Date.now();
+  const n = focusNudgeN[host] || 0;
   focusNudgeAt[host] = now;
   focusNudgeN[host] = n + 1;
-
   const mins = Math.max(1, Math.round((focus.until - now) / 60000));
-  const msg = FOCUS_NUDGE_MSGS[n % FOCUS_NUDGE_MSGS.length]
-    .replace('{host}', host).replace('{min}', String(mins));
-  focusNotify('🎯 专注模式', msg);
-
-  const { focusEvents } = await focusGet({ focusEvents: [] });
-  (focusEvents || []).push({ t: now, host, kind: 'nudge' });
-  await focusSet({ focusEvents: (focusEvents || []).slice(-200) });
+  const pool = focus.mode === 'white' ? FOCUS_NUDGE_MSGS_WHITE : FOCUS_NUDGE_MSGS;
+  const msg = pool[n % pool.length].replace('{host}', host).replace('{min}', String(mins));
+  focusNotify(focus.mode === 'white' ? '🎯 白名单专注' : '🎯 专注模式', msg);
+  await pushFocusEvent({ t: now, host, kind: 'nudge' });
 }
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
@@ -1318,7 +1515,7 @@ chrome.tabs.onActivated.addListener((ai) => {
   getTabSafe(ai.tabId).then(focusCheckTab);
 });
 
-/* 离开黑名单站点时评估 dwell：忍住 or 破戒 */
+/* 离开分心站点时评估 dwell：忍住 or 破戒（黑名单/白名单两种模式共用） */
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (!info.url && info.status !== 'complete') return;
   const d = focusDwell[tabId];
@@ -1327,15 +1524,26 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (host && (host === d.host || host.endsWith('.' + d.host))) return; // 还在该站
   const dwellMs = Date.now() - d.since;
   delete focusDwell[tabId];
+  // Backlog：RL 结算 —— 离开瞬间看提醒是否还没触发
+  const pend = focusPending[tabId];
+  const selfRecovered = !!(pend && !pend.fired); // 没等提醒就自己走了
+  const wasNudged = !pend || pend.fired;         // 已经提醒过（或本轮无需提醒）
+  clearPending(tabId);
   if (dwellMs < 5000) return; // 误判（瞬时跳转）
   (async () => {
     const { focus } = await focusGet({ focus: null });
     if (!focus || focus.until <= Date.now()) return;
     const kind = dwellMs >= FOCUS_DWELL_MS ? 'broke' : 'resist';
-    const { focusEvents } = await focusGet({ focusEvents: [] });
-    (focusEvents || []).push({ t: Date.now(), host: d.host, kind, dwellMs });
-    await focusSet({ focusEvents: (focusEvents || []).slice(-200) });
-    if (kind === 'resist') focusNotify('💪 干得漂亮', '你离开了「' + d.host + '」，已记入「忍住」。');
+    const t = Date.now();
+    const hour = new Date(t).getHours();
+    await pushFocusEvent({ t, host: d.host, kind, dwellMs, hour });
+    await bumpHostHour(d.host, hour); // Day7：时段直方图
+    if (kind === 'resist') {
+      focusNotify('💪 干得漂亮', '你离开了「' + d.host + '」，已记入「忍住」。');
+      if (selfRecovered) await updateNudgePolicy(d.host, +1); // 自我纠正成功 → 下次更晚提醒
+    } else if (wasNudged) {
+      await updateNudgePolicy(d.host, -1);                    // 提醒过仍破戒 → 下次更早拦截
+    }
   })();
 });
 
@@ -1352,9 +1560,15 @@ async function finalizeFocus(auto) {
   // 专注效率：1 - 破戒×0.15 - 提醒×0.03，下限 0
   const efficiency = Math.max(0, Math.round((1 - broken * 0.15 - nudges * 0.03) * 100) / 100);
 
+  // Day9：会话回放数据（精简后随报告留存，最多 120 个事件）
+  const events = ev.slice(-120).map((e) => ({
+    t: e.t, kind: e.kind, host: e.host, dwellMs: e.dwellMs, reason: e.reason || null,
+  }));
   const report = {
     start: focus.start, end: now, minutes: focus.minutes,
     nudges, resisted, broken, efficiency, completed, auto: !!auto,
+    mode: focus.mode || 'black',   // Day3
+    events,                        // Day9
   };
   const reports = ((await focusGet({ focusReports: [] })).focusReports || []);
   reports.push(report);
@@ -1372,6 +1586,7 @@ async function finalizeFocus(auto) {
   });
   try { chrome.action.setBadgeText({ text: '' }); } catch (_e) { /* 忽略 */ }
   for (const k of Object.keys(focusDwell)) delete focusDwell[k];
+  for (const k of Object.keys(focusPending)) clearPending(k);
 
   // 番茄周期：自然到期才排休息
   if (auto && focus.pomodoro && completed) {
