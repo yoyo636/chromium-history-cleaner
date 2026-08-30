@@ -1002,3 +1002,57 @@ input[type="checkbox"] {
   background: var(--glass-strong);
   white-space: nowrap;
 }
+
+/* ==================== 专注：分心原因速记（Day5） ==================== */
+.reason-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+.reason-ask {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.reason-done {
+  font-size: 11.5px;
+  color: var(--success);
+}
+
+/* ==================== 专注：会话回放时间轴（Day9） ==================== */
+.replay-track {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  margin-top: 8px;
+}
+.replay-base {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(120, 130, 150, 0.22);
+}
+.replay-seg {
+  position: absolute;
+  top: 2px;
+  height: 10px;
+  border-radius: 3px;
+  min-width: 2px;
+  opacity: 0.9;
+}
+.replay-seg:hover {
+  opacity: 1;
+  transform: scaleY(1.3);
+}
+.replay-none {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
