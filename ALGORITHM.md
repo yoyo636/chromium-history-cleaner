@@ -1,6 +1,6 @@
 # 「观息」视觉疲劳引擎 & 专注模式 v2 —— 自研算法设计文档
 
-> 版本：v4.5.0 · 引擎实现：`fatigue-engine.js`（729 行）· 渲染层：`content.js`
+> 版本：v4.7.0 · 引擎实现：`fatigue-engine.js`（902 行）· 渲染层：`content.js`
 > 专注后台：`background.js` 专注模块 · 状态 UI：`modules/focus.js`
 > 所有计算均在本地完成，不采集、不上传任何数据。
 
@@ -111,6 +111,55 @@ score01 = Π sᵢ^{wᵢ}   （权重按信号可用性归一）
 `chrome.storage.local.fatigueProfile`：7 个 Welford + 2 个 P² 分位器 + 会话计数。
 每 60s 学习推入、每 10 分钟节流写盘。设置里可 `resetCalibration()` 重新校准。
 
+### 1.7 内容类型自适应（Day2）
+
+**动机**：同一份信号在不同页面里含义相反——代码页持续高速键入是正常工作不是硬撑，
+长文页来回滚动是扫读不是漫无目的，表格页频繁点击是切筛选不是躁动。
+用一套固定权重必然在某一类页面上系统性误判。
+
+**检测**（`detectPageType()`，60s 缓存，DOM 扫描每类最多统计 400 个节点）：
+
+| 类型 | 判据（满足任一） | 说明 |
+|------|------------------|------|
+| code | 命中 Monaco / CodeMirror / Ace / `view-lines` 等编辑器容器；或代码块 > 8 处；或代码字符 > 3000 | 数「块」不够（一行一个 `<code>` 会虚高），必须同时看字符量 |
+| table | 单元格 > 120；或表格 > 3 个 | 单元格数比表格数更能区分「数据表」与「排版用 table」 |
+| article | 段落 > 20；或正文字符 > 3000 | 段落数 + 文本体量双通道 |
+| generic | 以上都不满足 | 兜底 |
+
+**三层调节**：
+
+```
+① 融合权重 PAGE_WEIGHTS        各类信号在总分里的占比
+     code    mouse .16 scroll .16 key .20 click .06 video .04 reading .10 daze .06
+     article mouse .28 scroll .26 key .08 click .08 video .10 reading .10 daze .06
+     table   mouse .24 scroll .24 key .12 click .10 video .06 reading .06 daze .06
+     generic mouse .24 scroll .20 key .12 click .08 video .10 reading .08 daze .06
+② 信号折减 PAGE_SIGNAL_SCALE   该类页面里「本就正常」的动作先打折再进入几何融合
+     code    wander ×0.80  key ×0.60  click ×0.90
+     article wander ×0.70                           daze ×1.10
+     table   wander ×0.85  key ×0.90  click ×0.70
+③ 阈值偏移 PAGE_THRESHOLD_SHIFT  升级阈值整体右移（点数）
+     code +3    article +2    table +1    generic 0
+```
+
+折减发生在**融合之前**：代码页键入信号先 ×0.6，再用 0.20 的权重参与几何平均；
+阈值偏移发生在**分级之前**，两者叠加使「代码页连续写两小时」不会被判成重度疲劳。
+
+**实测**（DOM 桩驱动，同一段操作流：慢速抖动鼠标 200 次 + 慢滚 4000px + 快敲 120 键）：
+
+| 页面类型 | 得分 | 与 generic 差 |
+|----------|------|---------------|
+| code | 24 | −7 |
+| article | 31 | 0 |
+| generic | 31 | 基准 |
+| table | 35 | +4 |
+
+分差 11 分，证明权重表不是摆设（同输入、仅类型不同的输出确有区别）。
+
+**接线**：content.js 不再自写一套 `detectType()`，改读引擎的 `pageType()`（单一真相源），
+类型随 `FATIGUE_REPORT` 上报；background 按类型累计高强度分钟存 `eyecare.pageTypeMinutes`，
+弹窗「页面类型自适应」卡片展示当前类型、权重解读与今日类型分布。
+
 ---
 
 ## 二、专注模式 v2 算法
@@ -154,12 +203,13 @@ threat ≥ 0.35 进入 Top12 建议
 
 | 组件 | 行数 | 性质 |
 |------|------|------|
-| fatigue-engine.js | 729 | 自研引擎（全部真实可运行） |
-| content.js（渲染层，重构后） | 215 | 渲染 + 上报 |
+| fatigue-engine.js | 902 | 自研引擎（全部真实可运行） |
+| content.js（渲染层，重构后） | 253 | 渲染 + 上报 |
 | focus 后台（background.js 专注模块） | ~250 | 状态机/威胁/番茄 |
-| modules/focus.js | 236 | 专注 UI |
+| modules/focus.js | 280 | 专注 UI |
+| modules/fatigue.js | 206 | 护眼仪表盘（含类型自适应 / 引擎状态卡片） |
 
-**诚实声明**：本仓库两个功能的真实算法代码合计约 1400 行（另有设计文档），不到一万行。
+**诚实声明**：本仓库两个功能的真实算法代码合计约 1900 行（另有设计文档），不到一万行。
 这是"把每个函数都做有意义"前提下的真实规模；任何为凑到一万行而添加的部分都将是注水，
 不建议在评审场合声称超出实际规模的数字。
 
@@ -175,11 +225,18 @@ threat ≥ 0.35 进入 Top12 建议
   - 护眼：20-20-20 微休息教练（连续活跃 20 分钟且 ≥2 级 → 提示远眺 20 秒）
   - 专注：每日目标（默认 60 分钟，只计完成会话；进度条 + 达成通知）
   - 专注：周报聚合（近 7 天总量 / 完成率 / 平均效率 / 忍住率）
-- [ ] **Day 2**：护眼——内容类型自适应权重（code/article/table/generic 四类页面用不同信号权重与分级阈值；`detectType()` 结果接入引擎权重表）
+- [x] **Day 2（已完成 v4.7.0）**：护眼——内容类型自适应权重
+  - 引擎：新增 `detectPageType()`（编辑器容器 + 代码块字符量 / 单元格数 / 段落文本量，60s 缓存，扫描上限 400 节点）→ `PAGE_WEIGHTS` + `PAGE_SIGNAL_SCALE`（信号折减）+ `PAGE_THRESHOLD_SHIFT`（code +3 / article +2 / table +1）三层调节；`predict()` 阈值同步偏移
+  - 接线：content.js 删除重复的 `detectType()`，改读 `ENGINE.pageType()`；上报新增 `pageType`；background 按类型累计 `pageTypeMinutes`
+  - UI：弹窗新增「页面类型自适应」卡片（类型徽章 + 权重解读 + 今日类型分布）；新增 `.pt-badge` 样式
+  - 行数：fatigue-engine.js 821 → 902；content.js 238 → 253；modules/fatigue.js 127 → 206
 - [ ] **Day 3**：专注——白名单模式（会话可选「只许列表内站点」，反向判定 dwell 逻辑）
 - [ ] **Day 4**：护眼——周级疲劳画像（按日聚合疲劳曲线，输出每日常态 μ/σ 与离群日标记，弹窗展示小趋势）
 - [ ] **Day 5**：专注——提醒即速记（通知带按钮？MV3 限制 → 改为扩展弹窗内「分心原因」快选，写入 focusEvents，供威胁评分加权）
-- [ ] **Day 6**：护眼——引擎自诊断（输出各信号健康度：样本量/方差塌缩检测/基线漂移告警，写入 fatigueProfile.diagnostics）
+- [x] **Day 6（已完成 v4.7.0，提前）**：护眼——引擎自诊断
+  - 引擎侧 `diagnostics()`（各 Welford 样本量 / 均值 / 标准差，`cold` 样本不足、`degenerate` 方差塌缩、P² 就绪度、整体 health）由当日 07:02 的自动化产出，本次补完上报链路与出口并验收
+  - 接线：content.js 每 60s 随 `FATIGUE_REPORT` 上报 `diagnostics`；background 存 `eyecare.diagnostics`
+  - UI：弹窗新增「引擎状态」卡片（健康度徽章 + 6 个信号状态 chip，hover 显示样本量/均值/标准差）；新增 `.diag-chip` 样式
 - [ ] **Day 7**：专注——威胁评分二阶化（引入「时段敏感性」：同一域名在深夜 vs 工作时段威胁分不同）
 - [ ] **Day 8**：护眼——爆表信号源追溯（breakdown 里定位本次主要贡献信号，建议针对性休息动作）
 - [ ] **Day 9**：专注——会话回放（按 focusEvents 时间轴渲染单次会话的抵抗/破戒序列图，纯 CSS 条带）
