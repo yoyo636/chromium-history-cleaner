@@ -11,8 +11,14 @@
 
 'use strict';
 
-const CAP = 500; // 单窗口请求上限（越大调用次数越少，但受浏览器 API 限制）
-const MAX_DEPTH = 12; // 二分最大深度，防止极端历史下递归过深
+/* CAP 必须等于「浏览器单次实际能返回的最大条数」，否则触顶判定永远为假、
+ * 二分永不触发 —— 表现就是「查询被静默截断到 CAP 条，历史永远删不完」。
+ * chrome.history.search 的 maxResults 默认 100，实测单次上限也是 100。 */
+const CAP = 100;
+/* 二分深度：时间轴是 [1970, now] 约 56 年，而历史往往集中在最近几个月。
+ * 光把「有数据的那一段」从 56 年里切出来就要十几层，再切到每窗 <100 条又要几层。
+ * 12 层在真实数据上不够，会静默丢数据，故放到 28（触顶路径才会递归，空窗口一层就返回）。 */
+const MAX_DEPTH = 28;
 
 /* ------------------------- 基础 history 查询 ------------------------- */
 function historySearch(startTime, endTime, maxResults) {
@@ -47,16 +53,18 @@ function searchAll(startTime, endTime) {
 }
 
 async function collectAll(arr, startTime, endTime, depth) {
-  if (endTime <= startTime || depth > MAX_DEPTH) return arr;
+  if (endTime < startTime) return arr;
   const items = await historySearch(startTime, endTime, CAP);
-  if (items.length < CAP) {
-    arr.push(...items); // 窗口未触顶，本窗口已取全
+  // 触顶 = 本窗口很可能还有没返回的记录 → 继续对半拆
+  // 但必须留退路：深度用尽或时间粒度已到 1ms 时，保留本次结果而不是丢弃
+  const splittable = endTime - startTime >= 1;
+  if (items.length >= CAP && depth < MAX_DEPTH && splittable) {
+    const mid = startTime + Math.floor((endTime - startTime) / 2);
+    await collectAll(arr, startTime, mid, depth + 1);
+    await collectAll(arr, mid + 1, endTime, depth + 1);
     return arr;
   }
-  // 触顶 → 对半拆分递归，丢弃不完整的本次结果
-  const mid = startTime + Math.floor((endTime - startTime) / 2);
-  await collectAll(arr, startTime, mid, depth + 1);
-  await collectAll(arr, mid + 1, endTime, depth + 1);
+  arr.push(...items); // 未触顶（已取全），或无法再拆（宁可不全，也不能丢）
   return arr;
 }
 
@@ -102,16 +110,15 @@ async function walkStats(acc, startTime, endTime, depth) {
   if (endTime <= startTime) return;
   const items = await historySearch(startTime, endTime, CAP);
   const hitCap = items.length >= CAP;
-  if (hitCap) {
-    if (depth >= MAX_DEPTH) {
-      acc.limited = true;
-      return;
-    }
+  const splittable = endTime - startTime >= 1;
+  if (hitCap && depth < MAX_DEPTH && splittable) {
     const mid = startTime + Math.floor((endTime - startTime) / 2);
     await walkStats(acc, startTime, mid, depth + 1);
     await walkStats(acc, mid + 1, endTime, depth + 1);
     return;
   }
+  // 深度/粒度用尽时仍要把这批算进去，并如实标记「统计不完整」
+  if (hitCap) acc.limited = true;
   for (const i of items) {
     acc.count++;
     acc.totalVisits += i.visitCount || 1;
