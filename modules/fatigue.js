@@ -196,6 +196,86 @@
       );
     }
 
+    /* ---------- Day8：爆表信号源追溯 ---------- */
+    const top = ec && ec.lastTopSignal;
+    if (top && level >= 3) {
+      root.appendChild(
+        HC.el('div', { class: 'row glass' }, [
+          HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
+            HC.el('div', { class: 'section-title', text: '这次是谁把分数顶上去的' }),
+            HC.el('div', { class: 'row', style: 'padding:6px 0 2px;gap:8px;' }, [
+              HC.el('span', { class: 'pt-badge', style: 'background:#e67e22;', text: top.label || top.key }),
+              HC.el('span', { class: 'note-text', style: 'font-size:12px;flex:1;min-width:180px;',
+                text: `贡献占比 ${Math.round((top.share || 0) * 100)}% · 该信号强度 ${Math.round((top.value || 0) * 100)}/100` }),
+            ]),
+            ec.lastAdvice
+              ? HC.el('p', { class: 'note-text', style: 'margin-top:6px;font-size:13px;color:var(--text);', text: '👉 ' + ec.lastAdvice })
+              : null,
+          ]),
+        ])
+      );
+    }
+
+    /* ---------- Backlog：马尔可夫链（等级跳变） ---------- */
+    const mk = ec && ec.markov;
+    if (mk && mk.samples > 0) {
+      const nextTxt = mk.next
+        ? `从 ${mk.current} 级出发，历史上最可能去 ${mk.next.level} 级（${Math.round((mk.next.p || 0) * 100)}%，基于 ${mk.next.samples} 次观测）`
+        : '当前等级还没有足够的跳变样本';
+      root.appendChild(
+        HC.el('div', { class: 'row glass' }, [
+          HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
+            HC.el('div', { class: 'section-title', text: '等级转移模型（马尔可夫）' }),
+            HC.el('p', { class: 'note-text', style: 'margin-top:4px;font-size:12.5px;', text: nextTxt }),
+            HC.el('div', { class: 'bar-list', style: 'margin-top:6px;' },
+              (mk.stationary || []).map((p, i) => HC.el('div', { class: 'bar-row', title: `长期停留在 ${i + 1} 级的时间占比 ${Math.round(p * 100)}%` }, [
+                HC.el('span', { class: 'bar-label', text: (i + 1) + ' 级' }),
+                HC.el('div', { class: 'bar-track' }, [
+                  HC.el('div', { class: 'bar-fill', style: `width:${Math.max(2, p * 100)}%;background:${LEVEL_META[i + 1].color};` }),
+                ]),
+                HC.el('span', { class: 'bar-val', text: Math.round(p * 100) + '%' }),
+              ]))
+            ),
+            HC.el('p', { class: 'note-text', style: 'margin-top:4px;font-size:12px;',
+              text: `稳态分布：长期看你有 ${mk.highRatio}% 的时间处在 4 级以上（累计 ${mk.samples} 次等级跳变）。` }),
+          ]),
+        ])
+      );
+    }
+
+    /* ---------- Day4：周级疲劳画像 ---------- */
+    chrome.storage.local.get({ eyecareHistory: [] }, (hs) => {
+      const hist = ((hs && hs.eyecareHistory) || []).slice(-7);
+      if (hist.length < 2) return;
+      const avgs = hist.map((d) => d.avg).filter((v) => typeof v === 'number');
+      if (avgs.length < 2) return;
+      const mu = avgs.reduce((a, b) => a + b, 0) / avgs.length;
+      const sigma = Math.sqrt(avgs.reduce((a, b) => a + (b - mu) ** 2, 0) / avgs.length);
+      const isOutlier = (v) => sigma > 1e-6 && Math.abs(v - mu) / sigma >= 1.5;
+      const maxAvg = Math.max(...avgs, 1);
+      const card = HC.el('div', { class: 'row glass' }, [
+        HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
+          HC.el('div', { class: 'section-title', text: '周级疲劳画像（近 ' + hist.length + ' 天）' }),
+          HC.el('p', { class: 'note-text', style: 'margin-top:4px;font-size:12.5px;',
+            text: `每日常态 μ = ${mu.toFixed(1)} 分，标准差 σ = ${sigma.toFixed(1)} 分；偏离 μ 超过 1.5σ 的日子标记为离群日 ⚠。` }),
+          HC.el('div', { class: 'bar-list', style: 'margin-top:6px;' },
+            hist.map((d) => {
+              const out = isOutlier(d.avg);
+              return HC.el('div', { class: 'bar-row', title:
+                `${d.date} · 日均 ${d.avg} 分 · 峰值 ${d.max} 分 · 高强度 ${d.minutes} 分钟 · ${d.samples} 个采样点` }, [
+                HC.el('span', { class: 'bar-label', text: d.date.slice(5) + (out ? ' ⚠' : '') }),
+                HC.el('div', { class: 'bar-track' }, [
+                  HC.el('div', { class: 'bar-fill', style: `width:${Math.max(3, (d.avg / maxAvg) * 100)}%;background:${out ? 'var(--danger)' : 'var(--accent)'};` }),
+                ]),
+                HC.el('span', { class: 'bar-val', text: d.avg + ' 分' }),
+              ]);
+            })
+          ),
+        ]),
+      ]);
+      root.insertBefore(card, root.lastChild);
+    });
+
     // 说明
     root.appendChild(
       HC.el('div', { class: 'row glass' }, [
