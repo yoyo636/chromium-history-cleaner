@@ -17,6 +17,31 @@
     5: { label: '重度疲劳', color: '#e5484d', tip: '强烈建议离开屏幕走动 3 分钟，喝杯水' },
   };
 
+  /* Day2：四类页面的权重解读（对应 fatigue-engine.js 的 PAGE_WEIGHTS / PAGE_SIGNAL_SCALE） */
+  const PAGE_META = {
+    code: { label: '代码', color: '#7cb342', desc: '键入权重最高；持续打字按正常工作打折（×0.6），升级阈值放宽 3 分' },
+    article: { label: '长文', color: '#4c7bf3', desc: '鼠标 / 滚动权重最高；来回扫读属正常（路径熵 ×0.7），阈值放宽 2 分' },
+    table: { label: '表格', color: '#c98a16', desc: '鼠标 / 滚动主导；频繁点击切筛选属正常（×0.7），阈值放宽 1 分' },
+    generic: { label: '通用', color: '#5b6472', desc: '默认均衡权重，信号不打折，阈值不偏移' },
+  };
+  const PAGE_ORDER = ['code', 'article', 'table', 'generic'];
+
+  /* Day6：引擎自诊断的健康度与单信号状态配色 */
+  const HEALTH_META = {
+    good: { label: '良好', color: '#2c9d6b', tip: '基线已建立，各信号有区分度' },
+    warming: { label: '校准中', color: '#c98a16', tip: '部分信号仍在积累样本，结果仅供参考' },
+    cold: { label: '样本不足', color: '#5b6472', tip: '刚开始使用，个人基线尚未建立，引擎按保守值运行' },
+  };
+  const SIGNAL_LABEL = {
+    keyRate: '键入速率', clickRate: '点击速率', scrollSpeed: '滚动速度',
+    mouseSpeed: '鼠标速度', mouseReversal: '方向反转', keyGap: '键入节奏',
+  };
+  const SIGNAL_STATUS = {
+    ok: { label: '正常', color: '#2c9d6b' },
+    cold: { label: '样本不足', color: '#5b6472' },
+    degenerate: { label: '方差塌缩', color: '#e5484d' },
+  };
+
   function fmtTime(ts) {
     const d = new Date(ts);
     const p = (n) => String(n).padStart(2, '0');
@@ -116,6 +141,60 @@
       ]),
     ]);
     root.appendChild(box);
+
+    /* ---------- Day2：页面类型自适应 ---------- */
+    const ptm = (ec && ec.pageTypeMinutes) || null;
+    const lastType = (ec && ec.lastPageType) || 'generic';
+    const typeMeta = PAGE_META[lastType] || PAGE_META.generic;
+    const typeBars = PAGE_ORDER.map((t) => ({ t, m: ptm ? (ptm[t] || 0) : 0 }));
+    const maxType = Math.max(1, ...typeBars.map((b) => b.m));
+
+    root.appendChild(
+      HC.el('div', { class: 'row glass' }, [
+        HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
+          HC.el('div', { class: 'section-title', text: '页面类型自适应' }),
+          HC.el('div', { class: 'row', style: 'padding:6px 0 2px;gap:8px;' }, [
+            HC.el('span', { class: 'pt-badge', style: `background:${typeMeta.color};`, text: typeMeta.label }),
+            HC.el('span', { class: 'note-text', style: 'font-size:12px;flex:1;min-width:180px;', text: typeMeta.desc }),
+          ]),
+          HC.el('div', { class: 'bar-list', style: 'margin-top:6px;' },
+            typeBars.map((b) => HC.el('div', { class: 'bar-row', title: `${PAGE_META[b.t].label}页 · 高强度 ${Math.round(b.m)} 分钟` }, [
+              HC.el('span', { class: 'bar-label', text: PAGE_META[b.t].label + '页' }),
+              HC.el('div', { class: 'bar-track' }, [
+                HC.el('div', { class: 'bar-fill', style: `width:${Math.max(2, (b.m / maxType) * 100)}%;background:${PAGE_META[b.t].color};` }),
+              ]),
+              HC.el('span', { class: 'bar-val', text: Math.round(b.m) + ' 分' }),
+            ]))
+          ),
+        ]),
+      ])
+    );
+
+    /* ---------- Day6：引擎自诊断 ---------- */
+    const diag = ec && ec.diagnostics;
+    if (diag && diag.signals) {
+      const hm = HEALTH_META[diag.health] || HEALTH_META.cold;
+      root.appendChild(
+        HC.el('div', { class: 'row glass' }, [
+          HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
+            HC.el('div', { class: 'section-title', text: '引擎状态' }),
+            HC.el('div', { class: 'row', style: 'padding:6px 0 2px;gap:8px;' }, [
+              HC.el('span', { class: 'pt-badge', style: `background:${hm.color};`, text: hm.label }),
+              HC.el('span', { class: 'note-text', style: 'font-size:12px;flex:1;min-width:180px;', text: hm.tip }),
+            ]),
+            HC.el('div', { class: 'diag-list' }, diag.signals.map((s) => {
+              const st = SIGNAL_STATUS[s.status] || SIGNAL_STATUS.cold;
+              return HC.el('span', {
+                class: 'diag-chip',
+                style: `border-color:${st.color};color:${st.color};`,
+                title: `样本 ${s.n} · 均值 ${s.mean} · 标准差 ${s.std}`,
+                text: `${SIGNAL_LABEL[s.name] || s.name} ${st.label}`,
+              });
+            })),
+          ]),
+        ])
+      );
+    }
 
     // 说明
     root.appendChild(
