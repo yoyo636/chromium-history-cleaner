@@ -487,6 +487,40 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       finalizeFocus(false).then((r) => reply(true, r));
       return true;
 
+    /* --------------------------- 广告拦截 --------------------------- */
+    case 'ADBLOCK_GET':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可查询');
+      getAdblockState()
+        .then((s) => reply(true, s))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'ADBLOCK_TOGGLE':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可切换');
+      setAdblockEnabled(!!payload.on)
+        .then((s) => reply(true, s))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'ADBLOCK_ALLOW':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可加白');
+      allowSite(payload.host, true)
+        .then((s) => reply(true, s))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'ADBLOCK_UNALLOW':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可取消');
+      allowSite(payload.host, false)
+        .then((s) => reply(true, s))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'ADBLOCK_REPORT':
+      // 来自内容脚本的拦截计数上报
+      bumpAdblockCount(payload.count || 0).then(() => reply(true, true)).catch(() => reply(true, true));
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -1262,6 +1296,120 @@ const TAMPER_PASS = '248635';
 
 /* 房地产开发（隐藏工具集）：与开发者模式同款密码门禁，密码在设置里二次输入开/关 */
 const RE_ESTATE_PASS = 'easonwu12345';
+
+/* =========================================================================
+ * 广告拦截（Ad-block）
+ * 网络层：declarativeNetRequest 静态规则集（rules/adblock-rules.json）拦截
+ *         常见广告 / 追踪 / 数据交易域名；白名单通过「允许」动态规则实现。
+ * 外观层：content_adblock.js 按保守选择器隐藏广告元素并上报计数。
+ * 计数：每日 / 累计拦截数存 storage.local。
+ * ========================================================================= */
+const ADBLOCK_RULESET_ID = 'adblock-static';
+
+function getAdblockState() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      { adblockEnabled: true, adblockAllow: [], adblockToday: 0, adblockDate: '', adblockTotal: 0 },
+      (r) => {
+        let enabled = !!r.adblockEnabled;
+        // 与浏览器实际生效的规则集对齐（避免存储与 DNR 漂移）
+        if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.getEnabledRulesets) {
+          chrome.declarativeNetRequest.getEnabledRulesets((sets) => {
+            if (chrome.runtime.lastError) {
+              resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+              return;
+            }
+            enabled = (sets || []).includes(ADBLOCK_RULESET_ID);
+            resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+          });
+        } else {
+          resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+        }
+      }
+    );
+  });
+}
+
+function setAdblockEnabled(on) {
+  return new Promise((resolve, reject) => {
+    if (!chrome.declarativeNetRequest || !chrome.declarativeNetRequest.updateEnabledRulesets) {
+      return reject(new Error('当前浏览器不支持 declarativeNetRequest'));
+    }
+    const enable = !!on ? [ADBLOCK_RULESET_ID] : [];
+    chrome.declarativeNetRequest.updateEnabledRulesets({ enableRulesets: enable, disableRulesets: [ADBLOCK_RULESET_ID] },
+      () => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        chrome.storage.local.set({ adblockEnabled: !!on }, () => resolve({ enabled: !!on }));
+      });
+  });
+}
+
+// 白名单：通过一条「allow」动态规则覆盖静态规则集对该站发起的请求
+function allowSite(host, allow) {
+  return new Promise((resolve, reject) => {
+    if (!host) return reject(new Error('缺少域名'));
+    chrome.storage.local.get({ adblockAllow: [] }, (r) => {
+      let list = (r.adblockAllow || []).slice();
+      const has = list.includes(host);
+      if (allow && !has) list.push(host);
+      if (!allow && has) list = list.filter((h) => h !== host);
+      chrome.storage.local.set({ adblockAllow: list }, () => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        syncAllowRules().then(() => resolve({ allow: list })).catch(reject);
+      });
+    });
+  });
+}
+
+let _allowRuleId = 900000; // 动态规则 id 区间，避开静态 id（1..191）
+function syncAllowRules() {
+  return new Promise((resolve, reject) => {
+    if (!chrome.declarativeNetRequest || !chrome.declarativeNetRequest.updateDynamicRules) {
+      return reject(new Error('当前浏览器不支持动态调整规则'));
+    }
+    chrome.storage.local.get({ adblockAllow: [] }, (r) => {
+      const hosts = r.adblockAllow || [];
+      const rules = hosts.map((h, i) => ({
+        id: _allowRuleId + i,
+        priority: 2, // 高于静态规则（priority 1），从而放行白名单域名
+        action: { type: 'allow' },
+        condition: {
+          initiatorDomains: [h],
+          resourceTypes: ['script', 'image', 'stylesheet', 'xmlhttprequest', 'sub_frame', 'ping', 'font', 'media', 'websocket', 'other'],
+        },
+      }));
+      const removeIds = hosts.length
+        ? []
+        : []; // updateDynamicRules 用 addRules / removeRuleIds 时需要先取旧 id
+      chrome.declarativeNetRequest.getDynamicRules((existing) => {
+        const oldIds = (existing || []).map((x) => x.id);
+        chrome.declarativeNetRequest.updateDynamicRules(
+          { addRules: rules, removeRuleIds: oldIds },
+          () => {
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+            resolve(true);
+          }
+        );
+      });
+    });
+  });
+}
+
+// 内容脚本上报的外观拦截计数（累计 + 当日）
+function bumpAdblockCount(n) {
+  return new Promise((resolve) => {
+    if (!n || n <= 0) return resolve(true);
+    const today = new Date().toISOString().slice(0, 10);
+    chrome.storage.local.get({ adblockToday: 0, adblockDate: '', adblockTotal: 0 }, (r) => {
+      const sameDay = r.adblockDate === today;
+      const todayCount = sameDay ? (r.adblockToday || 0) + n : n;
+      chrome.storage.local.set(
+        { adblockToday: todayCount, adblockDate: today, adblockTotal: (r.adblockTotal || 0) + n },
+        () => resolve(true)
+      );
+    });
+  });
+}
 
 function handleReEstateUnlock(payload, reply) {
   const pass = String(payload.pass || '');

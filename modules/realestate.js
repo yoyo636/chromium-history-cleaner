@@ -30,6 +30,7 @@
         ['loan', '🏦 房贷计算', renderLoan],
         ['tax', '🧾 交易税费', renderTax],
         ['rent', '📈 租金回报', renderRent],
+        ['land', '🌳 土地面积', renderLand],
       ];
       let cur = 'loan';
       const btns = TABS.map(([k, label, fn]) => {
@@ -280,6 +281,81 @@
     [price, rent, vacant, maintain].forEach((el) => el.addEventListener('input', calc));
     body.appendChild(card);
     calc();
+  }
+
+  /* ============================ ④ 土地面积（房地产开发） ============================ */
+  function renderLand(body) {
+    const land = HC.el('input', { class: 'input', type: 'number', value: '50000', min: '1' }); // 土地面积 ㎡
+    const far = HC.el('input', { class: 'input', type: 'number', value: '2.5', step: '0.1', min: '0' }); // 容积率
+    const density = HC.el('input', { class: 'input', type: 'number', value: '30', step: '0.1', min: '0', max: '100' }); // 建筑密度 %
+    const green = HC.el('input', { class: 'input', type: 'number', value: '35', step: '0.1', min: '0', max: '100' }); // 绿地率 %
+    const price = HC.el('input', { class: 'input', type: 'number', value: '30000', min: '0' }); // 土地总价（万）
+    const saleable = HC.el('input', { class: 'input', type: 'number', value: '85', step: '1', min: '0', max: '100' }); // 可售比例 %
+
+    const out = HC.el('div', { class: 'opt-list' });
+
+    function calc() {
+      const A = Math.max(0, num(land, 0));          // 土地面积 ㎡
+      const r = Math.max(0, num(far, 0));           // 容积率
+      const den = Math.max(0, Math.min(100, num(density, 0)));   // 建筑密度 %
+      const grn = Math.max(0, Math.min(100, num(green, 0)));    // 绿地率 %
+      const P = Math.max(0, num(price, 0)) * WAN;   // 土地总价 元
+      const sal = Math.max(0, Math.min(100, num(saleable, 0))); // 可售比例 %
+
+      out.innerHTML = '';
+      if (A <= 0) {
+        out.appendChild(HC.el('div', { class: 'empty', text: '请输入土地面积（㎡）' }));
+        return;
+      }
+
+      const totalBuild = A * r;                       // 总建筑面积 ㎡
+      const baseArea = A * den / 100;                // 建筑基底面积 ㎡
+      const greenArea = A * grn / 100;               // 绿地面积 ㎡
+      const unitLandPrice = P / A;                   // 单位地价 元/㎡
+      const floorPrice = totalBuild > 0 ? P / totalBuild : 0; // 楼面地价 元/㎡
+      const saleArea = totalBuild * sal / 100;       // 可售建筑面积 ㎡
+      // 平均建筑层数 = 容积率 / 建筑密度（建筑密度用小数）
+      const avgFloors = den > 0 ? r / (den / 100) : 0;
+
+      out.appendChild(row('总建筑面积', fmtArea(totalBuild), true));
+      out.appendChild(row('建筑基底面积（建筑密度 ' + den.toFixed(1) + '%）', fmtArea(baseArea)));
+      out.appendChild(row('绿地面积（绿地率 ' + grn.toFixed(1) + '%）', fmtArea(greenArea)));
+      out.appendChild(row('平均建筑层数', avgFloors > 0 ? Math.round(avgFloors * 10) / 10 + ' 层' : '—'));
+      out.appendChild(row('单位地价（土地单价）', '¥ ' + fmtMoney(unitLandPrice) + ' /㎡'));
+      out.appendChild(row('楼面地价（关键指标）', '¥ ' + fmtMoney(floorPrice) + ' /㎡', true));
+      out.appendChild(row('可售建筑面积（' + sal.toFixed(0) + '%）', fmtArea(saleArea)));
+      out.appendChild(note('容积率 = 总建筑面积 ÷ 土地面积；建筑密度 = 建筑基底面积 ÷ 土地面积；平均层数 ≈ 容积率 ÷ 建筑密度。楼面地价用于测算单方开发成本与利润空间。各地规划指标口径不一，以出让合同与当地规划条件为准。'));
+    }
+
+    function row(label, val, big) {
+      return HC.el('div', { class: 'opt-row' }, [
+        HC.el('div', { class: 'opt-info' }, [
+          HC.el('div', { class: 'opt-name', text: label }),
+        ]),
+        HC.el('div', {
+          class: big ? 'score-num' : 'opt-name',
+          style: big ? 'font-size:20px;color:var(--accent);' : 'color:var(--text);',
+          text: String(val),
+        }),
+      ]);
+    }
+
+    const card = HC.el('div', { class: 'row glass', style: 'display:block;padding:14px;' }, [
+      grid('土地面积（㎡）', land, '容积率', far),
+      grid('建筑密度（%）', density, '绿地率（%）', green),
+      grid('土地总价（万元）', price, '可售比例（%）', saleable),
+      HC.el('div', { class: 'section-title', style: 'margin-top:10px;', text: '结果' }),
+      out,
+    ]);
+    [land, far, density, green, price, saleable].forEach((el) => el.addEventListener('input', calc));
+    body.appendChild(card);
+    calc();
+  }
+
+  function fmtArea(n) {
+    if (!isFinite(n)) return '—';
+    if (n >= 10000) return Math.round(n).toLocaleString('zh-CN') + ' ㎡（' + (Math.round(n / 10000 * 100) / 100) + ' 万㎡）';
+    return Math.round(n).toLocaleString('zh-CN') + ' ㎡';
   }
 
   /* ============================ 公共小件 ============================ */
