@@ -9,8 +9,6 @@ services:
     buildCommand: python3 build_all.py --web
     startCommand: python3 website/server.py
     envVars:
-      - key: PORT
-        value: 8765
       - key: PYTHON_VERSION
         value: 3.12.4
     healthCheckPath: /api/version
