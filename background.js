@@ -402,6 +402,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     /* --------------------- 开发者模式 · 篡改（密码门禁在后台） --------------------- */
+    case 'RE_SET_UNLOCK':
+      handleReEstateUnlock(payload, reply);
+      return true;
+
     case 'TAMPER_SET_DEV':
       handleTamperSetDev(payload, reply);
       return true;
@@ -1100,6 +1104,16 @@ function bpInjectProtocolToActiveAiTab(reply) {
  *     书签可完全增删改；下载记录可删除；Cookie 可改值/删除
  * ========================================================================= */
 const TAMPER_PASS = '248635';
+
+/* 房地产开发（隐藏工具集）：与开发者模式同款密码门禁，密码在设置里二次输入开/关 */
+const RE_ESTATE_PASS = 'easonwu12345';
+
+function handleReEstateUnlock(payload, reply) {
+  const pass = String(payload.pass || '');
+  if (pass !== RE_ESTATE_PASS) return reply(false, null, '密码错误');
+  chrome.storage.local.set({ reEstateUnlocked: !!payload.on }, () =>
+    reply(true, { unlocked: !!payload.on }));
+}
 
 function tamperReady() {
   return new Promise((resolve) => {
