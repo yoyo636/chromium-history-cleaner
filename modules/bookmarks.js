@@ -134,7 +134,7 @@
     if (!sel.length) return HC.toast('请先勾选', 'warn');
     HC.confirm({
       title: '删除选中的书签？',
-      body: `将删除 <b>${sel.length}</b> 个书签，此操作<b>不可恢复</b>。`,
+      bodyHtml: `将删除 <b>${sel.length}</b> 个书签，此操作<b>不可恢复</b>。`,
       danger: true,
     }).then((ok) => {
       if (!ok) return;

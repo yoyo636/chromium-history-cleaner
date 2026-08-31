@@ -111,6 +111,28 @@
     return clamp01(logistic(z, 1.6, 0.8));
   }
 
+  /** Welford 合并（Chan et al. 并行算法）：把批次 b 并入 a */
+  function welfordMerge(a, b) {
+    if (!a || a.n === 0) return new Welford(b.n, b.mean, b.m2);
+    if (!b || b.n === 0) return new Welford(a.n, a.mean, a.m2);
+    const n = a.n + b.n;
+    const d = b.mean - a.mean;
+    return new Welford(n, a.mean + (d * b.n) / n, a.m2 + b.m2 + (d * d * a.n * b.n) / n);
+  }
+
+  /** Welford 增量提取：cur 相对 prev 的新增样本批次（合并的逆运算）。
+   *  多标签页档案合并用：每个页面只应贡献「自上次写盘以来的增量」，
+   *  否则同一份样本会被反复合并进存储，均值被稀释、样本量虚高。 */
+  function welfordDelta(prev, cur) {
+    const nB = cur.n - prev.n;
+    if (nB <= 0) return null; // 无新增（或被重置，由调用方特判）
+    if (prev.n === 0) return new Welford(cur.n, cur.mean, cur.m2);
+    const meanB = (cur.n * cur.mean - prev.n * prev.mean) / nB;
+    const dm = prev.mean - meanB;
+    const m2B = Math.max(0, cur.m2 - prev.m2 - ((prev.n * nB) / cur.n) * dm * dm);
+    return new Welford(nB, meanB, m2B);
+  }
+
   /* =======================================================================
    * 2. P² 在线分位数估计（Jain & Chlamtac 1985）
    *    O(1) 内存维护任意分位数，无需存原始样本。
@@ -236,11 +258,9 @@
     constructor() {
       this.speed = new Welford();        // 速度分布
       this.jerkBins = new Array(8).fill(0); // 急动度直方图
-      this.pauses = [];                  // 每分钟停顿时长(ms)
       this.lastX = 0; this.lastY = 0; this.lastT = 0;
       this.lastSpeed = 0; this.lastAngle = null;
       this.reversals = 0; this.moves = 0;
-      this.pauseStart = 0; this.pauseMsWindow = 0;
       this._winStart = performance.now();
     }
     move(x, y) {
@@ -272,17 +292,21 @@
       this.lastSpeed = speed;
       this.lastX = x; this.lastY = y; this.lastT = now;
     }
-    /** 每分钟快照：停顿率、反转率、速度 μ/σ、急动熵 */
-    snapshot(activeMsWindow) {
-      const std = this.speed.std;
-      const out = {
+    /** 每分钟窗口统计（纯读取，无副作用）——评分路径必须用 peek */
+    peek() {
+      return {
         speedMean: this.speed.mean,
-        speedStd: std,
+        speedStd: this.speed.std,
         reversalRate: this.moves > 20 ? this.reversals / this.moves : null,
         jerkEntropy: shannonEntropy(this.jerkBins),
-        pauseRatio: null,
         samples: this.speed.n,
       };
+    }
+    /** 每分钟快照并清零窗口计数——只有 learn() 拥有窗口边界的重置权。
+     * 历史 bug：评分路径（signals→compute）也调用本方法，与 learn() 互相
+     * 清零计数，导致 reversalRate 恒为 null、微颤动信号长期失效。 */
+    snapshot() {
+      const out = this.peek();
       this.reversals = 0; this.moves = 0;
       this.jerkBins.fill(0);
       // 速度分布重置过于激进会破坏 Welford；保留，仅窗口化使用 z()
@@ -498,6 +522,24 @@
     lastActiveAt: Date.now(),
 
     /* ---------- 档案持久化 ---------- */
+    _serializeProfile() {
+      const p = this.profile;
+      return {
+        welford: {
+          keyRate: p.welford.keyRate.toJSON(),
+          clickRate: p.welford.clickRate.toJSON(),
+          scrollRate: p.welford.scrollRate.toJSON(),
+          scrollSpeed: p.welford.scrollSpeed.toJSON(),
+          mouseSpeed: p.welford.mouseSpeed.toJSON(),
+          mouseReversal: p.welford.mouseReversal.toJSON(),
+          keyGap: p.welford.keyGap.toJSON(),
+        },
+        p2: { speedSlow: p.p2.speedSlow.toJSON(), reversal: p.p2.reversal.toJSON() },
+        markov: { trans: p.markov.trans.slice(), samples: p.markov.samples },
+        sessions: p.sessions,
+        savedAt: Date.now(),
+      };
+    },
     async loadProfile() {
       try {
         const r = await chrome.storage.local.get({ [PROFILE_KEY]: null });
@@ -515,30 +557,72 @@
           }
         }
       } catch (_e) { /* 档案损坏则冷启动 */ }
+      // 合并基线：载入的存储态即「本页面已贡献过的部分」
+      this._lastSaved = this._serializeProfile();
     },
+    /* 多标签页读-合并-写：每个页面只合并「自上次写盘以来的增量」。
+     * 直接整写会让多开的标签页互相覆盖同一份档案（旧 bug：
+     * 个性化基线在多开场景下不可靠）。无跨标签互斥锁可用，
+     * 10 分钟节流写盘下并发冲突概率极低，残留竞争可接受。 */
     async saveProfile(force) {
       const now = Date.now();
       if (!force && now - this.profile.savedAt < SAVE_EVERY_MS) return;
       this.profile.savedAt = now;
       const p = this.profile;
+      const prev = this._lastSaved;
       try {
-        await chrome.storage.local.set({
-          [PROFILE_KEY]: {
-            welford: {
-              keyRate: p.welford.keyRate.toJSON(),
-              clickRate: p.welford.clickRate.toJSON(),
-              scrollRate: p.welford.scrollRate.toJSON(),
-              scrollSpeed: p.welford.scrollSpeed.toJSON(),
-              mouseSpeed: p.welford.mouseSpeed.toJSON(),
-              mouseReversal: p.welford.mouseReversal.toJSON(),
-              keyGap: p.welford.keyGap.toJSON(),
-            },
-            p2: { speedSlow: p.p2.speedSlow.toJSON(), reversal: p.p2.reversal.toJSON() },
-            markov: { trans: p.markov.trans, samples: p.markov.samples },
-            sessions: p.sessions,
+        const r = await chrome.storage.local.get({ [PROFILE_KEY]: null });
+        const stored = r[PROFILE_KEY];
+        let out;
+        if (!stored || !stored.welford || !prev) {
+          out = this._serializeProfile();
+        } else {
+          const welford = {};
+          for (const k of Object.keys(p.welford)) {
+            const cur = p.welford[k];
+            const pv = prev.welford[k] || { n: 0, mean: 0, m2: 0 };
+            if (cur.n < pv.n) {
+              // 本地档案被 resetProfile 清零：以本地为准覆盖存储
+              welford[k] = cur.toJSON();
+            } else {
+              const delta = welfordDelta(Welford.from(pv), cur);
+              welford[k] = delta
+                ? welfordMerge(Welford.from(stored.welford[k] || { n: 0 }), delta).toJSON()
+                : (stored.welford[k] || cur.toJSON());
+            }
+          }
+          // P² 分位器算法上不支持合并：保留样本量更大的一方（被打回冷启动时以本地为准）
+          const pickP2 = (key) => {
+            const cur = p.p2[key].toJSON();
+            const st = stored.p2 && stored.p2[key];
+            const pvN = prev.p2 && prev.p2[key] ? prev.p2[key].n || 0 : 0;
+            if (cur.n < pvN) return cur; // 本地重置
+            return st && (st.n || 0) > cur.n ? st : cur;
+          };
+          // 马尔可夫：按增量累加转移计数；本地重置（负增量）则覆盖
+          const stM = stored.markov && Array.isArray(stored.markov.trans) && stored.markov.trans.length === 25
+            ? stored.markov : { trans: new Array(25).fill(0), samples: 0 };
+          const pvM = prev.markov || { trans: new Array(25).fill(0), samples: 0 };
+          let markov;
+          if (p.markov.samples < pvM.samples) {
+            markov = { trans: p.markov.trans.slice(), samples: p.markov.samples };
+          } else {
+            const trans = stM.trans.map((v, i) => v + Math.max(0, p.markov.trans[i] - (pvM.trans[i] || 0)));
+            markov = { trans, samples: stM.samples + Math.max(0, p.markov.samples - pvM.samples) };
+          }
+          const sessions = p.sessions < prev.sessions
+            ? p.sessions
+            : (stored.sessions || 0) + Math.max(0, p.sessions - prev.sessions);
+          out = {
+            welford,
+            p2: { speedSlow: pickP2('speedSlow'), reversal: pickP2('reversal') },
+            markov,
+            sessions,
             savedAt: now,
-          },
-        });
+          };
+        }
+        await chrome.storage.local.set({ [PROFILE_KEY]: out });
+        this._lastSaved = this._serializeProfile();
       } catch (_e) { /* 配额/环境问题忽略 */ }
     },
     resetProfile() {
@@ -591,8 +675,8 @@
       const P = this.profile;
       const sig = {};
 
-      // S4 鼠标运动学
-      const ms = this.mouse.snapshot(winMs);
+      // S4 鼠标运动学（peek 纯读取；窗口计数由 learn() 统一重置）
+      const ms = this.mouse.peek();
       // 速度慢（相对个人分布的 p35 基线）→ 疲劳
       const slowBase = P.p2.speedSlow.value();
       const mouseSlow = slowBase != null
@@ -879,7 +963,7 @@
       if (this.clickRate.ready()) P.welford.clickRate.push(this.clickRate.rate);
       if (this.scroll.speeds.n > 5) P.welford.scrollSpeed.push(this.scroll.speeds.mean);
       if (this.mouse.speed.n > 20) P.welford.mouseSpeed.push(this.mouse.speed.mean);
-      const rr = this.mouse.snapshot(60000).reversalRate;
+      const rr = this.mouse.snapshot().reversalRate;
       if (rr != null) { P.p2.reversal.push(rr); P.welford.mouseReversal.push(rr); }
       const slowBaseSample = this.mouse.speed.mean;
       if (slowBaseSample > 0) P.p2.speedSlow.push(slowBaseSample);
@@ -889,11 +973,13 @@
         if (m > 0.5) P.welford.keyGap.push(this.keyRate.rhythmVariance());
       }
     },
-    /** 活跃毫秒增量（供上报） */
+    /** 活跃毫秒增量（供上报）。注意：返回真实毫秒。
+     * 历史 bug：曾返回秒（d/1000）却命名为 Ms，background 再按毫秒换算，
+     * 导致护眼时长统计缩小 60 倍。 */
     activeDeltaMs() {
       const d = this.session.activeMs - this.session.lastReportedActiveMs;
       this.session.lastReportedActiveMs = this.session.activeMs;
-      return Math.round(d / 1000);
+      return Math.round(d);
     },
     summary() {
       return {
@@ -981,7 +1067,7 @@
    * ===================================================================== */
   window.addEventListener('mousemove', (e) => { Engine.touch(); Engine.mouse.move(e.clientX, e.clientY); }, { passive: true });
   window.addEventListener('mousedown', () => { Engine.touch(); Engine.clickRate.hit(); }, { passive: true });
-  window.addEventListener('keydown', (e) => { Engine.touch(); Engine.keyRate.hit(); if (e.key === 'Backspace') Engine._bs = (Engine._bs || 0) + 1; }, { passive: true });
+  window.addEventListener('keydown', (e) => { Engine.touch(); Engine.keyRate.hit(); }, { passive: true });
   window.addEventListener('scroll', () => { Engine.touch(); Engine.scroll.onScroll(window.scrollY || document.documentElement.scrollTop || 0); }, { passive: true });
   Engine.video.observe();
 
@@ -989,14 +1075,14 @@
    * 6. 对外 API（content.js 使用）
    *    window.__EyeCareEngine.tick()        → 一步：返回评分/等级/置信度
    *    window.__EyeCareEngine.heartbeat()   → 每 5s 活跃统计
-   *    window.__EyeCareEngine.activeDeltaSec()
+   *    window.__EyeCareEngine.activeDeltaMs() → 活跃毫秒增量（真实毫秒）
    *    window.__EyeCareEngine.summary()     → 弹窗展示用摘要
    *    window.__EyeCareEngine.resetCalibration()
    * ===================================================================== */
   window.__EyeCareEngine = {
     tick: () => Engine.step(Date.now()),
     heartbeat: () => Engine.heartbeat(),
-    activeDeltaSec: () => Engine.activeDeltaMs(),
+    activeDeltaMs: () => Engine.activeDeltaMs(),
     summary: () => Engine.summary(),
     pageType: () => Engine.pageTypeInfo(),
     diagnostics: () => Engine.diagnostics(),

@@ -1,8 +1,8 @@
 # Privacy Policy
 
 **Extension**: Browser Companion · History & Tab Manager
-**Version**: 4.1
-**Effective Date**: August 26, 2026
+**Version**: 4.2
+**Effective Date**: August 31, 2026
 **Developer / Contact**: This is an open-source extension hosted at https://github.com/yoyo636/chromium-history-cleaner . For any questions regarding this policy, please reach us via the Issues section of this repository.
 
 ---
@@ -27,6 +27,7 @@ This extension reads local data **only when you actively use a feature**, throug
 | Saved sessions (list of URLs) | Sessions module: save / restore / delete, stored in the extension's local storage | No |
 | Web interaction signals (mouse movement / scrolling / typing rhythm / long tasks / frame rate) | Eye-care & Performance modules compute fatigue level and resource usage locally for progressive reading adjustments and load alerts | No |
 | Fingerprint API call events (whether pages read Canvas / WebGL fingerprint APIs) | Privacy module generates a local report to help you identify potential tracking; "Shield" mode randomizes fingerprint output locally | No |
+| Target-page content (page text / element info / visible-area screenshot), Chromium build only | The "AI control" (BrowserPilot) feature: when you ask a supported web-based AI (Kimi / DeepSeek / MiniMax) to operate your browser, the extension injects page-reading results into that AI conversation. **The extension itself calls no AI service and transmits nothing on its own**; this content reaches your chosen AI provider only when you subsequently send a message in that conversation (see Section 5) | Only via your conversation |
 | Preferences (theme / default time range / toggles) | Save your personalized settings in the extension's local storage | No |
 
 **We explicitly do NOT collect**: your name, email, account credentials, passwords, payment information, real identity, or any personally identifiable information.
@@ -56,9 +57,10 @@ In incognito windows, this extension follows the browser's incognito semantics:
 
 ## 5. Sharing and Third Parties
 
-- **We do not** sell, rent, or share your data with any third party.
+- **We do not** sell, rent, or share your data with any third party; this extension has no server side, and the developer has no access to any of your data.
 - The extension contains no third-party analytics, advertising, crash-reporting, or statistics SDKs; all code is bundled inside the extension package and no external scripts or CDNs are loaded.
-- Network requests are limited to two types, both executed by the browser and carrying no user data: (1) the bookmarks "dead-link check" sends a `HEAD` request to a bookmark URL (transmitting only that URL itself, to determine whether the link is broken); (2) normal navigation initiated by you. No other network transmission is made by the extension.
+- **Network requests initiated by the extension itself** are limited to two types, both executed by the browser: (1) the bookmarks "dead-link check" sends a `HEAD` request to a bookmark URL (transmitting only that URL itself); (2) the AI-control feature's protocol document is loaded from the extension's own bundled resources (nothing is sent out). No other network transmission is made by the extension.
+- **One exception you should know about (Chromium build, AI-control feature only):** when you use this feature in a web-based AI (Kimi / DeepSeek / MiniMax), the extension injects the page text / element info / screenshot it has read into your AI conversation as a `<tool_result>`. That content then reaches your chosen AI provider's servers when you next send a message in that conversation — the exact same data path as if you had copied and pasted the page content to the AI yourself. The feature is off by default and only runs when you enable and use it; sensitive actions (payment / password / send / delete) trigger a separate confirmation window first. The extension itself connects to no AI API and relays no data.
 
 ---
 
@@ -74,7 +76,10 @@ This extension declares the following permissions, all used for the functions de
 | `downloads` | Download record management, export files to disk |
 | `browsingData` | Clear browsing data (cache, cookies, etc.) after your confirmation |
 | `tabCapture` | Audio module: capture the current tab's audio stream for spectrum classification only when you click "Analyze" |
-| `scripting` / `host_permissions` (http/https) | Privacy module script injection (fingerprint monitoring & randomization), eye-care / performance content scripts |
+| `scripting` / `host_permissions` (http/https) | Privacy module script injection (fingerprint monitoring & randomization), eye-care / performance content scripts; AI-control executes click / type / read actions in the target tab you designate |
+| `activeTab` | Grants the AI-control feature temporary access to the tab you are currently interacting with (no standing all-site permission needed) |
+| `cookies` | Cleanup module counts per-site cookie numbers and usage (counts and names only, never cookie values) |
+| `alarms` | Schedules eye-care rest reminders and sustained high-load performance alerts (instead of a persistent background timer) |
 | `notifications` | High-load and auto-mute alerts |
 | `storage` | Store preferences, sessions, and local fatigue / privacy / performance data |
 
@@ -98,4 +103,4 @@ For any questions about this policy or the extension's data handling, please con
 
 ---
 
-*Last updated: August 26, 2026.*
+*Last updated: August 31, 2026.*

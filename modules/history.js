@@ -256,7 +256,7 @@
       function delOne(x) {
         HC.confirm({
           title: '删除这条历史？',
-          body: `将永久删除 <b>${HC.escapeHtml(x.title || x.url || '(无标题)')}</b>，此操作<b>不可恢复</b>。`,
+          bodyHtml: `将永久删除 <b>${HC.escapeHtml(x.title || x.url || '(无标题)')}</b>，此操作<b>不可恢复</b>。`,
           danger: true,
         }).then((ok) => {
           if (!ok) return;
@@ -296,7 +296,7 @@
         if (!sel.length) return HC.toast('请先勾选要删除的记录', 'warn');
         HC.confirm({
           title: '删除选中的历史？',
-          body: `将永久删除 <b>${sel.length}</b> 条历史记录，此操作<b>不可恢复</b>。`,
+          bodyHtml: `将永久删除 <b>${sel.length}</b> 条历史记录，此操作<b>不可恢复</b>。`,
           danger: true,
         }).then(async (ok) => {
           if (!ok) return;
@@ -315,7 +315,7 @@
         const scope = range[0] === 0 ? '全部时间' : `${fmtDate(range[0])} 到 ${fmtDate(range[1])}`;
         HC.confirm({
           title: '删除该时间段全部历史？',
-          body: `将永久删除 <b>${scope}</b> 范围内的<b>全部</b>历史记录，<b>不可恢复</b>。`,
+          bodyHtml: `将永久删除 <b>${scope}</b> 范围内的<b>全部</b>历史记录，<b>不可恢复</b>。`,
           danger: true,
         }).then((ok) => {
           if (!ok) return;

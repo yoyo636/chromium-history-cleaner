@@ -40,11 +40,14 @@
     /* 不支持 longtask 时忽略 */
   }
 
-  /* ---------- 帧率估算（渲染/GPU 压力代理） ---------- */
+  /* ---------- 帧率估算（渲染/GPU 压力代理） ----------
+   * rAF 在隐藏标签页会被浏览器节流/暂停，fps 会读到一个失真的陈旧值。
+   * 可见时才采样；重新可见时重置窗口，避免把暂停时长算成一帧的超长间隔。 */
   let fps = 60;
   let frames = 0;
   let lastFpsAt = performance.now();
   function tickFps() {
+    if (document.hidden) return; // 暂停；visibilitychange 可见时重启
     frames++;
     const now = performance.now();
     if (now - lastFpsAt >= 1000) {
@@ -54,7 +57,13 @@
     }
     requestAnimationFrame(tickFps);
   }
-  requestAnimationFrame(tickFps);
+  function startFps() {
+    frames = 0;
+    lastFpsAt = performance.now();
+    requestAnimationFrame(tickFps);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) startFps(); }, { passive: true });
+  startFps();
 
   /* ---------- 内存 ---------- */
   function readHeap() {
@@ -86,6 +95,7 @@
 
   /* ---------- 上报 ---------- */
   function report() {
+    const longTasks = longTaskCount; // 先快照再清零（旧版清零后才读 → 上报恒为 0）
     const busy = Math.min(100, Math.round((longTaskMs / (REPORT_MS * 0.9)) * 100));
     const heap = readHeap();
     const attrib = [...attribMap.entries()]
@@ -99,7 +109,7 @@
     try {
       chrome.runtime.sendMessage({
         type: 'PERFORM_REPORT',
-        payload: { busy, longTasks: longTaskCount, heap, fps, attrib, media },
+        payload: { busy, longTasks, heap, fps, attrib, media },
       });
     } catch (_e) {
       /* 后台不可达时忽略 */
@@ -158,6 +168,12 @@ function analyzeStream(streamId) {
         let lowEnergy = 0; // <200Hz
         const bins = analyser.frequencyBinCount;
         const nyquist = ctx.sampleRate / 2;
+        /* 频段对应的 bin 数随 sampleRate 变化——旧版用魔数 17/21/5 估算，
+         * 48kHz 与 44.1kHz 设备上结果会漂移。按实际 nyquist 精确计算。 */
+        const binPerHz = bins / nyquist;
+        const voiceBins = Math.max(1, Math.ceil(3400 * binPerHz) - Math.floor(200 * binPerHz));
+        const highBins = Math.max(1, bins - Math.floor(8000 * binPerHz));
+        const lowBins = Math.max(1, Math.floor(200 * binPerHz));
 
         function sample() {
           analyser.getByteFrequencyData(freq);
@@ -181,9 +197,11 @@ function analyzeStream(streamId) {
           }
           // 分类
           const avg = totalEnergy / samples;
-          const voiceRatio = voiceEnergy / samples / (avg * 17); // 人声带占比
-          const highRatio = highEnergy / samples / (avg * 21);
-          const lowRatio = lowEnergy / samples / (avg * 5);
+          // 各频段「每 bin 平均能量」相对「全频段每 bin 平均能量」的占比，
+          // 随 sampleRate 自适应（替代旧版硬编码 17/21/5）
+          const voiceRatio = avg > 0 ? (voiceEnergy / samples / voiceBins) / avg : 0;
+          const highRatio = avg > 0 ? (highEnergy / samples / highBins) / avg : 0;
+          const lowRatio = avg > 0 ? (lowEnergy / samples / lowBins) / avg : 0;
           stream.getTracks().forEach((t) => t.stop());
           ctx.close().catch(() => {});
 

@@ -85,7 +85,7 @@
       function delSaved(s, store) {
         HC.confirm({
           title: '删除存档？',
-          body: `将删除会话「${HC.escapeHtml(s.name)}」。`,
+          body: `将删除会话「${s.name}」。`,
           danger: true,
         }).then((ok) => {
           if (!ok) return;

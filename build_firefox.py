@@ -22,8 +22,18 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 MANIFEST_FIREFOX = os.path.join(ROOT, 'manifest.firefox.json')
 EXCLUDE = {
     '.git', 'node_modules', '__pycache__', 'dist-firefox', 'dist-chromium',
-    'manifest.firefox.json', 'build_firefox.py', 'upload.py', 'sync_github.py',
+    'manifest.firefox.json', 'build_firefox.py', 'build_all.py',
+    'upload.py', 'upload_cws.py', 'sync_github.py',
+    'generate_icons.py', 'listing-preview.html',
 }
+
+# Firefox 版不含 BrowserPilot：gecko manifest 未注册 content-bridge，
+# 确认窗/协议文档/弹窗模块在 Firefox 均为死代码，打包时一并剔除。
+FIREFOX_EXCLUDE = (
+    'content-bridge.js', 'browserpilot-protocol.md',
+    'bp-confirm.html', 'bp-confirm.js',
+    os.path.join('modules', 'browserpilot.js'),
+)
 
 
 def main():
@@ -54,6 +64,12 @@ def main():
 
     # 用 Firefox manifest 覆盖
     shutil.copy2(MANIFEST_FIREFOX, os.path.join(out_dir, 'manifest.json'))
+
+    # 剔除 BrowserPilot 相关文件（Firefox 版不提供该功能）
+    for rel in FIREFOX_EXCLUDE:
+        p = os.path.join(out_dir, rel)
+        if os.path.exists(p):
+            os.remove(p)
 
     # 打包 zip
     zip_path = os.path.join(out_dir, 'browser-companion-firefox.zip')

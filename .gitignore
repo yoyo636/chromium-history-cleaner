@@ -8,3 +8,4 @@ node_modules/
 
 # 打包输出（在仓库上级 dist-packages/，也不进本仓库）
 *.zip
+.DS_Store

@@ -8,7 +8,7 @@
  *     Welford 在线归一化、P² 个人基线校准、迟滞分级、双 EMA 平滑。
  *   - 本文件只负责：
  *     ① 自适应渲染（等级 1-5 渐进、主阅读区、内容类型、聚焦阅读）
- *     ② 每 60s 向 background 上报 {score, level, confidence, trend, activeDeltaSec}
+ *     ② 每 60s 向 background 上报 {score, level, confidence, trend, activeDeltaMs}
  * ------------------------------------------------------------------------- */
 
 'use strict';
@@ -19,7 +19,7 @@
 
   const ENGINE = window.__EyeCareEngine;
   const REPORT_MS = 60000; // 上报周期
-  const STEP_MS = 5000;    // 渐进步长（30 秒完成 1→5 共 6 级）
+  const STEP_MS = 5000;    // 渐进步长（5 级共 4 次跃迁，约 20 秒完成 1→5）
 
   /* ============================ 配置开关 ============================ */
   let enabled = true;
@@ -238,7 +238,7 @@
             level: r.level,
             confidence: r.confidence,
             trend: r.trend,
-            activeDeltaMs: ENGINE.activeDeltaSec(),
+            activeDeltaMs: ENGINE.activeDeltaMs(),
             pageType: type || 'generic',
             diagnostics: diag,
             topSignal: r.topSignal || null,   // Day8

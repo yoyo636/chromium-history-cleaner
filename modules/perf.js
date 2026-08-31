@@ -95,7 +95,7 @@
             class: 'mini danger',
             text: '关闭',
             onclick: () => {
-              HC.confirm({ title: '关闭该标签？', body: `将关闭「${HC.escapeHtml(t.title || '')}」。`, danger: true })
+              HC.confirm({ title: '关闭该标签？', body: `将关闭「${t.title || ''}」。`, danger: true })
                 .then((ok) => ok && HC.callBackground('TAB_ACTION', { action: 'close', tabId: t.id })
                   .then(() => { HC.toast('已关闭', 'success'); load(); })
                   .catch((e) => HC.toast(e.message, 'error')));

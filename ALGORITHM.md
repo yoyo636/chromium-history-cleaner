@@ -1,7 +1,7 @@
 # 「观息」视觉疲劳引擎 & 专注模式 v2 —— 自研算法设计文档
 
-> 版本：v4.8.0 · 引擎实现：`fatigue-engine.js`（1014 行）· 渲染层：`content.js`（261 行）
-> 专注后台：`background.js`（1634 行）· 状态 UI：`modules/focus.js`（417 行）
+> 版本：v4.10.0 · 引擎实现：`fatigue-engine.js`（1100 行）· 渲染层：`content.js`（261 行）
+> 专注后台：`background.js`（1937 行）· 状态 UI：`modules/focus.js`（417 行）
 > 护眼仪表盘：`modules/fatigue.js`（286 行）· 健康分：`modules/health.js`（132 行）
 > 所有计算均在本地完成，不采集、不上传任何数据。
 
@@ -338,9 +338,9 @@ delay ∈ [0, 60s]，初始 0s（立即提醒）
 
 | 组件 | 行数 | 性质 |
 |------|------|------|
-| fatigue-engine.js | 1014 | 自研引擎（全部真实可运行） |
+| fatigue-engine.js | 1100 | 自研引擎（全部真实可运行） |
 | content.js（渲染层） | 261 | 渲染 + 上报 |
-| background.js（全量，含专注后台） | 1634 | 状态机/威胁/番茄/白名单/RL |
+| background.js（全量，含专注后台） | 1937 | 状态机/威胁/番茄/白名单/RL |
 | modules/focus.js | 417 | 专注 UI（含回放时间轴、原因速记） |
 | modules/fatigue.js | 286 | 护眼仪表盘（类型自适应 / 引擎状态 / 周画像 / 归因 / 马尔可夫） |
 | modules/health.js | 132 | 健康分（六项，含专注纪律） |

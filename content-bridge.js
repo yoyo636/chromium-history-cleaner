@@ -126,9 +126,21 @@
     };
   }
 
-  /* ---------- 调试开关 ---------- */
-  const DEBUG = true;
+  /* ---------- 调试开关（生产默认关闭；排障时改为 true） ---------- */
+  const DEBUG = false;
   function bpLog(...args) { if (DEBUG) console.log('[BrowserPilot]', ...args); }
+
+  /* ---------- 已执行指令指纹（FIFO 上限） ----------
+   * 历史 bug：processed 曾未声明（strict 模式下 ReferenceError，检测路径整体崩溃），
+   * 修复后亦不能无限增长（长会话内存单向上升），故加上限。
+   * 注意：完全相同的指令不会重复执行——AI 重发同一指令通常是渲染抖动；
+   * 若确需重复执行（如再次滚动），指令应带不同参数（amount / nonce）。 */
+  const PROCESSED_CAP = 500;
+  const processed = new Set();
+  function processedAdd(fp) {
+    processed.add(fp);
+    if (processed.size > PROCESSED_CAP) processed.delete(processed.values().next().value);
+  }
 
   /* ---------- 浮动面板状态行：把检测/执行状态直接显示在页面上，无需开控制台 ----------
    * 用户一眼就能看到：是否在监听、是否检测到 tool_call、执行了哪个工具、是否出错。
@@ -150,8 +162,9 @@
     let s = String(raw || '').trim();
     // 去掉 markdown 代码块围栏 ```json / ```
     s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-    // 去掉行内注释 // 与 /* */
-    s = s.replace(/\/\/[^\n\r]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    /* 注意：不要盲删 // 与 注释 —— 会把 URL 里的 https:// 截成 https:
+     * （旧 bug：AI 输出 {"url":"https://example.com"} 时参数被静默损坏）。
+     * JSON 本无注释，AI 偶发注释时由上层多次 parse 尝试兜底即可。 */
     // 中文引号 -> 英文
     s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
     // 去掉对象/数组末尾多余逗号
@@ -175,19 +188,18 @@
     return s;
   }
 
-  /* ---------- 递归扫描 DOM + Shadow DOM ----------
-   * 聊天内容常被放在 shadow root 里，普通 querySelectorAll 会漏掉。
+  /* ---------- 递归收集 shadow root ----------
+   * 聊天内容常被放在 shadow root 里，普通遍历会漏掉。
+   * 只遍历元素节点（不读文本），开销远小于旧版的全节点 TreeWalker。
    */
-  function collectAllNodes(root, out) {
+  function collectShadowRoots(root, out) {
     if (!root) return out;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     let node;
     while ((node = walker.nextNode()) !== null) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        out.push(node);
-        if (node.shadowRoot) collectAllNodes(node.shadowRoot, out);
-      } else {
-        out.push(node);
+      if (node.shadowRoot) {
+        out.push(node.shadowRoot);
+        collectShadowRoots(node.shadowRoot, out);
       }
     }
     return out;
@@ -196,28 +208,24 @@
     if (typeof t !== 'string' || t.indexOf('&lt;') === -1) return t;
     return t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   }
+  /* 取检测源文本：聊天容器的一次 textContent 序列化。
+   * 性能要点：textContent 不触发强制同步重排（innerText 会）。
+   * 旧版每 1.5s 对全页上万个节点逐个读 innerText，长对话页持续卡顿；
+   * 且「取最短候选文本」的启发式在流式输出中途可能选错节点。
+   * 现在直接用容器全文 + 全局正则提取所有 tool_call（去重由 processed 负责）。 */
   function findToolCallSource() {
-    const nodes = collectAllNodes(document.body, []);
-    const candidates = [];
-    for (const node of nodes) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = node.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue;
-        const text = decodeEntities(node.innerText || node.textContent || '');
-        if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
-      } else if (node.nodeType === Node.TEXT_NODE) {
-        const text = decodeEntities(node.textContent || '');
-        if (text.includes('<tool_call>')) candidates.push({ node, text, len: text.length });
+    const scope = adapter.getChat() || document.body;
+    if (!scope) return '';
+    let text = scope.textContent || '';
+    if (text.indexOf('<tool_call>') === -1 && text.indexOf('&lt;tool_call&gt;') === -1) {
+      // shadow root 兜底（容器文本未命中时才逐个查，避免每轮额外开销）
+      const roots = collectShadowRoots(scope, []);
+      for (const r of roots) {
+        const t = r.textContent || '';
+        if (t.indexOf('<tool_call>') !== -1 || t.indexOf('&lt;tool_call&gt;') !== -1) { text = t; break; }
       }
     }
-    if (!candidates.length) {
-      const fallback = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-      bpLog('未找到 <tool_call>，回退 body.innerText，长度=', fallback.length);
-      return fallback;
-    }
-    candidates.sort((a, b) => a.len - b.len);
-    bpLog('找到', candidates.length, '个候选，最短文本长度=', candidates[0].len);
-    return candidates[0].text;
+    return decodeEntities(text);
   }
   function stableFingerprint(tool, args) {
     try { return tool + '::' + JSON.stringify(args); } catch (_) { return tool + '::' + String(args); }
@@ -248,7 +256,7 @@
       }
       const fp = stableFingerprint(parsed.tool, parsed.args);
       if (processed.has(fp)) { bpLog('已执行过，跳过', parsed.tool); continue; }
-      processed.add(fp);
+      processedAdd(fp);
       bpLog('执行工具', parsed.tool, parsed.args);
       bpStatus('🔧 执行: ' + parsed.tool + ' …', '#fbbf24');
       executeTool(parsed.tool, parsed.args);
@@ -334,7 +342,7 @@
    * 注意：扩展重载后旧页面的旧脚本会留下一个"僵尸面板"，
    * 所以这里每次都先移除旧面板再重建（新脚本的 runtime 才是活的）。
    */
-  const BP_VERSION = '4.2.1';
+  const BP_VERSION = '4.2.2';
   function buildFloatingPanel() {
     const old = document.getElementById('bp-bridge-panel');
     if (old) old.remove();
@@ -425,10 +433,11 @@
     return false;
   });
 
-  /* ---------- 启动：监听 document 级 + 动态补挂 shadow root + 常驻兜底轮询 ----------
+  /* ---------- 启动：监听 document 级 + 动态补挂 shadow root + 低频兜底轮询 ----------
    * - 监听 document.documentElement 可覆盖普通 DOM 的流式/虚拟 DOM 变化；
    * - 每个轮询周期补挂新出现的 shadow root，避免 shadow 内 <tool_call> 漏检；
-   * - setInterval 兜底持续运行（降频 1500ms），覆盖一切 MutationObserver 漏掉的边缘场景。
+   * - MutationObserver 是主路径，setInterval（3s）仅作兜底
+   *   （旧版 1.5s 全量扫描 + 逐节点 innerText，主线程压力过大）。
    */
   function observeRoot(root, obs) {
     try {
@@ -442,17 +451,17 @@
     observeRoot(document.documentElement, obs);
     const seenRoots = new WeakSet();
     function scanAndMountShadow() {
-      collectAllNodes(document.body, []).forEach((n) => {
-        if (n.nodeType === Node.ELEMENT_NODE && n.shadowRoot && !seenRoots.has(n.shadowRoot)) {
-          seenRoots.add(n.shadowRoot);
-          observeRoot(n.shadowRoot, obs);
+      collectShadowRoots(document.body, []).forEach((sr) => {
+        if (!seenRoots.has(sr)) {
+          seenRoots.add(sr);
+          observeRoot(sr, obs);
         }
       });
     }
     scanAndMountShadow();
     setTimeout(scanAndMountShadow, 1500);
     detectToolCall(); // 首屏立即检测一次
-    setInterval(() => { scanAndMountShadow(); detectToolCall(); }, 1500); // 常驻兜底
+    setInterval(() => { scanAndMountShadow(); detectToolCall(); }, 3000); // 低频兜底
     window.BrowserPilot = { injectProtocol, getPlatform: () => PLATFORM, detectNow: detectToolCall };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

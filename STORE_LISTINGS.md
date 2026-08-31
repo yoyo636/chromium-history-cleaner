@@ -10,10 +10,10 @@
 
 | 包 | 适用商店 | 文件 |
 | --- | --- | --- |
-| Chromium 通用包（v4.1.0） | Chrome Web Store、Microsoft Edge Add-ons、Opera Add-ons、Tabbit、Brave、Arc 等所有 Chromium 内核浏览器 | `dist-packages/browser-companion-chromium.zip` |
-| Firefox 包（v4.1.0） | Firefox Add-ons（AMO） | `dist-packages/browser-companion-firefox.zip` |
+| Chromium 通用包（v4.10.0） | Chrome Web Store、Microsoft Edge Add-ons、Opera Add-ons、Tabbit、Brave、Arc 等所有 Chromium 内核浏览器 | `dist-packages/browser-companion-chromium.zip` |
+| Firefox 包（v4.10.0） | Firefox Add-ons（AMO） | `dist-packages/browser-companion-firefox.zip` |
 
-重新生成：`python3 history-cleaner/build_all.py`
+重新生成：`python3 chromium-history-manager/build_all.py`
 
 ---
 
@@ -110,7 +110,10 @@ Privacy & security:
 | downloads | 下载记录管理与文件导出 |
 | browsingData | 经确认后清除浏览数据（缓存/Cookie 等） |
 | tabCapture | 用户点击「分析」后识别当前标签音频内容 |
-| scripting + host_permissions | 隐私指纹监控/加固与护眼/性能内容脚本 |
+| scripting + host_permissions | 隐私指纹监控/加固、护眼/性能内容脚本、AI 操控在指定目标页执行操作 |
+| activeTab | AI 操控功能操作您当前交互的标签页时获取临时访问权 |
+| cookies | 清理模块统计各站点 Cookie 数量（仅计数，不读取内容） |
+| alarms | 定时触发护眼休息提醒与高负载预警 |
 | notifications | 高负载与自动静音提醒 |
 | storage | 本地保存偏好、会话与统计数据 |
 
@@ -125,7 +128,7 @@ Privacy & security:
 2. 「New item」→ 上传 `browser-companion-chromium.zip`。
 3. 填写：名称、简短/详细描述（见上）、类别（Productivity）、语言（zh-CN + en）、图标（自动从包读取）。
 4. 隐私实践：勾选需权限，粘贴「权限理由」；上传隐私政策 URL；填写单用途说明
-   （Single purpose：This extension provides browser productivity tools including history management, tab/session management, data cleanup, and optional eye-care/performance/privacy assistance, all processed locally.）。
+   （Single purpose：This extension provides browser productivity tools including history management, tab/session management, data cleanup, and optional eye-care/performance/privacy assistance. The Chromium build additionally offers an opt-in "AI control" (BrowserPilot) feature that lets a user-chosen web AI operate the current tab under explicit confirmation. All processing is local.）。
 5. 提交审核（通常 1-7 天）。
 
 ### 4.2 Microsoft Edge Add-ons
@@ -177,9 +180,9 @@ Privacy & security:
 - [ ] 图标 128×128 就绪（包内已有）
 - [ ] 权限理由文案就绪（本文件第三节）
 - [ ] 截图 3-6 张
-- [ ] Firefox 自测：`about:debugging` 临时加载，确认品牌识别为 Firefox、清理页无 Service Worker 项、性能页无「冻结」按钮
-- [ ] Chromium 自测：`chrome://extensions` 加载，核心功能正常
+- [ ] Firefox 自测：`about:debugging` 临时加载，确认品牌识别为 Firefox、清理页无 Service Worker 项、性能页无「冻结」按钮、包内无 AI 操控文件
+- [ ] Chromium 自测：`chrome://extensions` 加载，核心功能正常；开启 AI 操控后确认敏感操作会弹独立确认窗
 
 ---
 
-*版本 v4.1.0 · 2026-08-26*
+*版本 v4.10.0 · 2026-08-31*

@@ -48,7 +48,7 @@
   <div class="card">
     <h1>隐私政策 <span class="tag">Privacy Policy</span></h1>
     <div class="meta">适用扩展：浏览器搭子 · 历史与标签页管家（Browser Companion）<br>
-    版本 v4.1 · 生效日期：2026 年 8 月 26 日<br>
+    版本 v4.2 · 生效日期：2026 年 8 月 31 日<br>
     开源仓库：<a href="https://github.com/yoyo636/chromium-history-cleaner">github.com/yoyo636/chromium-history-cleaner</a></div>
 
     <div class="tldr">
@@ -68,6 +68,7 @@
       <tr><td>会话存档（URL 列表）</td><td>会话保存 / 恢复，存于扩展本地存储</td><td>否</td></tr>
       <tr><td>网页交互信号（鼠标 / 滚动 / 键盘节奏 / 长任务 / 帧率）</td><td>护眼与性能模块本地计算</td><td>否</td></tr>
       <tr><td>指纹调用事件（Canvas / WebGL 读取）</td><td>隐私模块本地报告与一键加固</td><td>否</td></tr>
+      <tr><td>目标网页内容（页面文本 / 元素信息 / 截图），仅 Chromium 版</td><td>「AI 操控」把页面读取结果注入您正在进行的 AI 对话；插件自身不调用 AI 服务、不主动联网，内容仅在您随后发送消息时到达您所选 AI 服务商（见第四节）</td><td>仅经您的对话发送</td></tr>
       <tr><td>偏好设置</td><td>主题 / 时间范围 / 开关，存于扩展本地存储</td><td>否</td></tr>
     </table>
     <p><strong>明确不收集：</strong>姓名、邮箱、账号、密码、支付信息、真实身份等任何可定位到个人的标识。</p>
@@ -84,9 +85,10 @@
 
     <h2>四、数据共享与第三方</h2>
     <ul>
-      <li><strong>不</strong>向任何第三方出售、出租或共享数据。</li>
+      <li><strong>不</strong>向任何第三方出售、出租或共享数据；本扩展无服务端，开发者无法接触您的数据。</li>
       <li>无第三方分析 / 广告 / 崩溃上报 SDK；代码全部内嵌，不加载外部脚本或 CDN。</li>
-      <li>网络请求仅两类：① 书签「死链检测」对书签 URL 发起 HEAD 探测（仅传输该 URL 本身）；② 您主动的网页访问。</li>
+      <li>插件自身发起的网络请求仅两类：① 书签「死链检测」对书签 URL 发起 HEAD 探测（仅传输该 URL 本身）；② 「AI 操控」的协议文档从扩展包内资源加载（不外发数据）。</li>
+      <li><strong>需知晓的例外（仅 Chromium 版「AI 操控」）</strong>：该功能会把读取到的页面文本 / 元素信息 / 截图注入您的 AI 对话，随您下一次发送到达所选 AI 服务商——与您手动复制粘贴页面内容给 AI 的路径相同。功能默认关闭；敏感操作（支付 / 密码 / 发送 / 删除）会先弹独立确认窗。插件不接入任何 AI API、不中转数据。</li>
     </ul>
 
     <h2>五、权限说明</h2>
@@ -98,7 +100,10 @@
       <tr><td><code>downloads</code></td><td>下载记录管理、文件导出</td></tr>
       <tr><td><code>browsingData</code></td><td>经确认后清除浏览数据（缓存 / Cookie 等）</td></tr>
       <tr><td><code>tabCapture</code></td><td>「音频」模块在您点击「分析」后识别当前标签音频（需用户触发）</td></tr>
-      <tr><td><code>scripting</code> + <code>host_permissions</code></td><td>隐私指纹监控 / 加固、护眼 / 性能内容脚本注入</td></tr>
+      <tr><td><code>scripting</code> + <code>host_permissions</code></td><td>隐私指纹监控 / 加固、护眼 / 性能内容脚本、AI 操控在指定目标页执行操作</td></tr>
+      <tr><td><code>activeTab</code></td><td>AI 操控操作您当前交互的标签页时获取临时访问权</td></tr>
+      <tr><td><code>cookies</code></td><td>清理模块统计各站点 Cookie 数量（仅计数，不读取值）</td></tr>
+      <tr><td><code>alarms</code></td><td>定时触发护眼休息提醒与高负载预警</td></tr>
       <tr><td><code>notifications</code></td><td>高负载与自动静音提醒</td></tr>
       <tr><td><code>storage</code></td><td>本地保存偏好、会话、统计数据</td></tr>
     </table>
@@ -112,7 +117,7 @@
     <h2>八、联系我们</h2>
     <p>任何疑问请通过 GitHub Issues 联系：<a href="https://github.com/yoyo636/chromium-history-cleaner/issues">github.com/yoyo636/chromium-history-cleaner/issues</a></p>
 
-    <div class="contact">本隐私政策最后更新：2026 年 8 月 26 日。English version: <a href="./PRIVACY_POLICY_EN.md">PRIVACY_POLICY_EN.md</a></div>
+    <div class="contact">本隐私政策最后更新：2026 年 8 月 31 日。English version: <a href="./PRIVACY_POLICY_EN.md">PRIVACY_POLICY_EN.md</a></div>
   </div>
 </div>
 </body>

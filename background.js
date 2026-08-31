@@ -205,12 +205,30 @@ async function walkStats(acc, startTime, endTime, depth) {
   }
 }
 
+/* ------------------------- 消息来源校验 -------------------------
+ * 边界约定：
+ *   - 扩展页（popup.html / bp-confirm.html）：sender 无 tab
+ *   - 内容脚本：sender.tab 存在，sender.tab.url 为所在页面 URL
+ * 历史/标签/音频/隐私等写操作只允许扩展页发起（内容脚本一律拒绝）；
+ * EXECUTE_TOOL 只允许 AI 站点的桥接内容脚本发起。 */
+function fromContentScript(sender) {
+  return !!(sender && sender.tab);
+}
+function isAiBridge(sender) {
+  return !!(sender && sender.tab && BP_AI_HOSTS.test(sender.tab.url || ''));
+}
+function isOwnExtension(sender) {
+  return !sender || !sender.id || sender.id === chrome.runtime.id;
+}
+
 /* --------------------------- 消息分发 --------------------------- */
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const type = msg && msg.type;
   const payload = (msg && msg.payload) || {};
   const reply = (ok, data, error) =>
     sendResponse({ ok, data: data == null ? null : data, error: error || null });
+
+  if (!isOwnExtension(_sender)) return reply(false, null, '仅接受本扩展消息');
 
   switch (type) {
     case 'SEARCH':
@@ -248,6 +266,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'DELETE_RANGE':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可执行删除');
       chrome.history.deleteRange(
         { startTime: payload.startTime, endTime: payload.endTime },
         () => {
@@ -259,6 +278,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'DELETE_URL':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可执行删除');
       chrome.history.deleteUrl({ url: payload.url }, () => {
         if (chrome.runtime.lastError)
           return reply(false, null, chrome.runtime.lastError.message);
@@ -308,6 +328,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'TAB_ACTION':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可操作标签页');
       doTabAction(payload, reply);
       return true;
 
@@ -331,6 +352,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'AUDIO_SET_MUTED':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可设置静音');
       chrome.tabs.update(payload.tabId, { muted: payload.muted }, (t) => {
         if (chrome.runtime.lastError) return reply(false, null, chrome.runtime.lastError.message);
         if (payload.forget && payload.domain) {
@@ -352,17 +374,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
       return true;
 
+    /* 等全部回调后返回真实成功数（旧版立即返回「尝试数」，失败对用户不可见） */
     case 'AUDIO_MUTE_ALL':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可设置静音');
       chrome.tabs.query({ audible: true }, (tabs) => {
         const ids = (tabs || []).map((t) => t.id).filter((x) => x != null);
         if (!ids.length) return reply(true, 0);
-        let done = 0;
-        ids.forEach((id) => chrome.tabs.update(id, { muted: true }, () => done++));
-        reply(true, ids.length);
+        Promise.all(ids.map((id) => new Promise((res) =>
+          chrome.tabs.update(id, { muted: true }, () => res(!chrome.runtime.lastError)))))
+          .then((rs) => reply(true, rs.filter(Boolean).length));
       });
       return true;
 
     case 'AUDIO_ANALYZE':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可发起分析');
       analyzeTabAudio(payload.tabId, reply);
       return true;
 
@@ -378,43 +403,66 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'PRIVACY_SET_MODE':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可切换模式');
       chrome.storage.local.set({ privacyMode: payload.mode }, () => reply(true, true));
       return true;
 
     case 'PRIVACY_CLEAR':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可清空记录');
       chrome.storage.local.set({ privacyEvents: [] }, () => reply(true, true));
       return true;
 
     /* ------------------------- BrowserPilot（网页端 AI 操作浏览器） ------------------------- */
     case 'EXECUTE_TOOL':
+      /* 关键边界：只接受三个 AI 站点的桥接内容脚本。
+       * 其他任何来源（普通网页注入的脚本、扩展页误调）一律拒绝。 */
+      if (!isAiBridge(_sender)) return reply(false, null, 'EXECUTE_TOOL 仅接受 AI 站点桥接脚本');
       handleBrowserPilot(payload, reply, _sender);
       return true;
 
     case 'BP_INJECT_PROTOCOL':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可注入协议');
       bpInjectProtocolToActiveAiTab(reply);
       return true;
 
     case 'BP_GET_CONTEXT':
-      reply(true, {
-        targetTabId: bpCtx.targetTabId,
-        lastNonAiTabId: bpCtx.lastNonAiTabId,
-      });
+      bpCtxGet().then((c) => reply(true, {
+        targetTabId: c.targetTabId,
+        lastNonAiTabId: c.lastNonAiTabId,
+      }));
       return true;
+
+    /* bp-confirm.html 敏感操作确认窗：取消息内容 / 回传用户决定 */
+    case 'BP_CONFIRM_GET':
+      {
+        const p = bpConfirmPending.get(payload.id);
+        reply(true, { message: p ? p.message : null });
+      }
+      return false;
+
+    case 'BP_CONFIRM_RESULT':
+      bpResolveConfirm(payload.id, !!payload.ok);
+      reply(true, true);
+      return false;
 
     /* --------------------- 开发者模式 · 篡改（密码门禁在后台） --------------------- */
     case 'RE_SET_UNLOCK':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可操作');
       handleReEstateUnlock(payload, reply);
       return true;
 
     case 'TAMPER_SET_DEV':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可操作');
       handleTamperSetDev(payload, reply);
       return true;
 
     case 'TAMPER_LIST':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可操作');
       handleTamperList(payload, reply);
       return true;
 
     case 'TAMPER_OP':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可操作');
       handleTamperOp(payload, reply);
       return true;
 
@@ -540,7 +588,7 @@ function handleFatigueReport(payload) {
         ec.log.push({ t: bucket, score: payload.score });
         if (ec.log.length > 288) ec.log.shift();
       }
-      ec.minutes = (ec.minutes || 0) + (payload.activeDeltaMs || 0) / 60;
+      ec.minutes = (ec.minutes || 0) + (payload.activeDeltaMs || 0) / 60000;
       ec.lastLevel = payload.level;
       ec.lastScore = payload.score;
       ec.updatedAt = now;
@@ -548,7 +596,7 @@ function handleFatigueReport(payload) {
       const pt = PAGE_TYPES.indexOf(payload.pageType) >= 0 ? payload.pageType : 'generic';
       ec.lastPageType = pt;
       if (!ec.pageTypeMinutes) ec.pageTypeMinutes = { code: 0, article: 0, table: 0, generic: 0 };
-      ec.pageTypeMinutes[pt] = (ec.pageTypeMinutes[pt] || 0) + (payload.activeDeltaMs || 0) / 60;
+      ec.pageTypeMinutes[pt] = (ec.pageTypeMinutes[pt] || 0) + (payload.activeDeltaMs || 0) / 60000;
       // Day6：引擎自诊断快照（各信号样本量 / 方差塌缩 / 健康度）
       if (payload.diagnostics) ec.diagnostics = payload.diagnostics;
       // Day8：本次的主要贡献信号与针对性休息建议
@@ -611,6 +659,12 @@ function handlePerfReport(tab, payload) {
       highStreak: payload.busy >= 75 ? (prev.highStreak || 0) + 1 : 0,
       lastNotify: prev.lastNotify || 0,
     };
+    /* 收敛：条目上限 200，超出按最旧 ts 淘汰（旧版无上限，长期堆积） */
+    const keys = Object.keys(map);
+    if (keys.length > 200) {
+      keys.sort((a, b) => (map[a].ts || 0) - (map[b].ts || 0));
+      for (let i = 0; i < keys.length - 200; i++) delete map[keys[i]];
+    }
     chrome.storage.local.set({ perfTabs: map });
 
     // 高负载预警（替代「风扇预警」：系统无温度/风扇 API）
@@ -633,6 +687,16 @@ function handlePerfReport(tab, payload) {
     }
   });
 }
+
+/* 标签页关闭后同步清理性能数据（旧版只增不删，条目永久堆积） */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.local.get({ perfTabs: {} }, (r) => {
+    const map = r.perfTabs || {};
+    if (!(tabId in map)) return;
+    delete map[tabId];
+    chrome.storage.local.set({ perfTabs: map });
+  });
+});
 
 function doTabAction(payload, reply) {
   const id = payload.tabId;
@@ -751,11 +815,44 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
  *     + 页面内确认弹窗，用户点「确认执行」才真正执行。
  * ========================================================================= */
 
-const bpCtx = { targetTabId: null, lastNonAiTabId: null };
+/* 上下文持久化到 storage.session：MV3 Service Worker 空闲约 30s 即被终止，
+ * 内存态的 targetTabId 丢失会让「连续指令落在同一页」的锁定静默失效。 */
+async function bpCtxGet() {
+  const r = await chrome.storage.session.get({ bpCtx: { targetTabId: null, lastNonAiTabId: null } });
+  return r.bpCtx;
+}
+async function bpCtxSet(patch) {
+  const c = await bpCtxGet();
+  Object.assign(c, patch);
+  await chrome.storage.session.set({ bpCtx: c });
+}
+
 const BP_AI_HOSTS = /kimi\.moonshot\.cn|chat\.deepseek\.com|chat\.minimaxi\.com/;
 function bpIsAiTab(url) {
   return BP_AI_HOSTS.test(url || '');
 }
+
+/* 目标页白名单：
+ *   bpUserTabs  —— 用户近期亲自激活过的标签页
+ *   bpOwnedTabs —— BrowserPilot 自己通过 browser_navigate 打开的标签页
+ * AI 传入的 args.tabId 只有命中白名单才被采信——旧版无条件采信，
+ * AI 可指定用户的网银 / 邮箱等任意标签页读取全文回传云端（数据外泄通道）。 */
+const bpUserTabs = new Set();
+const bpOwnedTabs = new Set();
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  bpUserTabs.add(tabId);
+  if (bpUserTabs.size > 500) bpUserTabs.delete(bpUserTabs.values().next().value); // 简单 LRU
+  getTabSafe(tabId).then((t) => {
+    if (t && t.url && !bpIsAiTab(t.url)) bpCtxSet({ lastNonAiTabId: tabId });
+  });
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  bpUserTabs.delete(tabId);
+  bpOwnedTabs.delete(tabId);
+});
+// SW 启动时补种当前各窗口的活跃标签
+chrome.tabs.query({ active: true }, (tabs) => (tabs || []).forEach((t) => t.id != null && bpUserTabs.add(t.id)));
+
 function getTabSafe(id) {
   return new Promise((resolve) => {
     if (id == null) return resolve(null);
@@ -766,16 +863,23 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// 目标页选择优先级：args.tabId > bpCtx.targetTabId > 最近非AI页 > 当前非AI活跃页
+// 目标页选择优先级：args.tabId（限白名单）> bpCtx.targetTabId > 最近非AI页 > 当前非AI活跃页
 async function bpPickTarget(args, senderTabId) {
-  if (args && args.tabId) return args.tabId;
-  if (bpCtx.targetTabId) {
-    const t = await getTabSafe(bpCtx.targetTabId);
-    if (t && !bpIsAiTab(t.url)) return bpCtx.targetTabId;
+  if (args && args.tabId != null) {
+    const t = await getTabSafe(args.tabId);
+    if (t && !bpIsAiTab(t.url) && (bpUserTabs.has(args.tabId) || bpOwnedTabs.has(args.tabId))) {
+      return args.tabId;
+    }
+    // 不在白名单：拒绝采信 AI 指定的 tabId，落入上下文链（不报错，避免指令流中断）
   }
-  if (bpCtx.lastNonAiTabId) {
-    const t = await getTabSafe(bpCtx.lastNonAiTabId);
-    if (t && !bpIsAiTab(t.url)) return bpCtx.lastNonAiTabId;
+  const ctx = await bpCtxGet();
+  if (ctx.targetTabId) {
+    const t = await getTabSafe(ctx.targetTabId);
+    if (t && !bpIsAiTab(t.url)) return ctx.targetTabId;
+  }
+  if (ctx.lastNonAiTabId) {
+    const t = await getTabSafe(ctx.lastNonAiTabId);
+    if (t && !bpIsAiTab(t.url)) return ctx.lastNonAiTabId;
   }
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (active && !bpIsAiTab(active.url)) return active.id;
@@ -792,29 +896,65 @@ async function bpInject(tabId, func, args) {
   return results && results[0] ? results[0].result : null;
 }
 
-// 等待标签页加载完成（最多 15s）
+// 等待标签页加载完成（最多 15s；超时返回 false，由调用方决定是否继续）
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
     const onUpd = (id, info) => {
       if (id === tabId && info.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(onUpd);
-        resolve();
+        resolve(true);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpd);
     setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(onUpd);
-      resolve();
+      resolve(false);
     }, 15000);
   });
 }
 
-// 敏感词判定：支付/密码/发送/删除
-const BP_SENSITIVE_RE = /支付|付款|提交订单|立即购买|下单|结算|发送|删除|确认支付|确认删除|pay|submit|send|delete|buy now|place order/i;
+/* 敏感判定：关键词黑名单（简/繁/英）+ 表单语义（正向模型）。
+ * 关键词永远会有漏网（图标按钮、其他语言），因此密码框 / 信用卡
+ * autocomplete 这类结构化信号优先于文本匹配。 */
+const BP_SENSITIVE_RE = /支付|付款|提交订单|立即购买|下单|结算|結算|发送|發送|删除|刪除|确认支付|確認支付|确认删除|確認刪除|转账|轉賬|汇款|匯款|保证金|保證金|登录|登錄|pay|checkout|submit|send|delete|transfer|purchase|buy now|place order|order now|add card|sign in|log in/i;
 function bpIsSensitive(info) {
   if (!info || !info.found) return false;
-  if (info.isPassword) return true;
+  if (info.isPassword || info.formHasPassword) return true;
+  if (info.autocomplete && /^(cc-|transaction-)/i.test(info.autocomplete)) return true;
   return BP_SENSITIVE_RE.test(info.text || '');
+}
+
+/* 敏感操作确认：独立扩展窗口（bp-confirm.html）。
+ * 确认 UI 绝不放进目标页 DOM——旧版页内弹窗可被页面脚本 querySelector
+ * 找到并自动点击「确认」，恶意页面等于自我批准。窗口被直接关闭 = 取消。 */
+const bpConfirmPending = new Map(); // id -> {resolve, message, winId, timer}
+function bpResolveConfirm(id, ok) {
+  const p = bpConfirmPending.get(id);
+  if (!p) return;
+  bpConfirmPending.delete(id);
+  if (p.timer) clearTimeout(p.timer);
+  p.resolve(ok);
+}
+chrome.windows.onRemoved.addListener((winId) => {
+  for (const [id, p] of bpConfirmPending) {
+    if (p.winId === winId) bpResolveConfirm(id, false);
+  }
+});
+function bpAskUserConfirm(message) {
+  return new Promise((resolve) => {
+    const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const rec = { resolve, message, winId: null, timer: null };
+    bpConfirmPending.set(id, rec);
+    rec.timer = setTimeout(() => bpResolveConfirm(id, false), 120000); // 2 分钟未响应 = 取消
+    chrome.windows.create({
+      url: chrome.runtime.getURL('bp-confirm.html?id=' + encodeURIComponent(id)),
+      type: 'popup', width: 480, height: 300, focused: true,
+    }, (win) => {
+      if (chrome.runtime.lastError || !win) return bpResolveConfirm(id, false);
+      const cur = bpConfirmPending.get(id);
+      if (cur) cur.winId = win.id;
+    });
+  });
 }
 
 /* -------------------------------------------------------------------------
@@ -862,16 +1002,29 @@ function bp_exec(args) {
       el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
   }
+  /* 敏感判定（页内自包含副本，与后台 BP_SENSITIVE_RE 保持同步）——
+   * executeScript 只序列化函数体，闭包外的常量不可用，故在此重复定义。 */
+  const SENSITIVE_RE = /支付|付款|提交订单|立即购买|下单|结算|結算|发送|發送|删除|刪除|确认支付|確認支付|确认删除|確認刪除|转账|轉賬|汇款|匯款|保证金|保證金|登录|登錄|pay|checkout|submit|send|delete|transfer|purchase|buy now|place order|order now|add card|sign in|log in/i;
+  function isSensitiveInfo(info) {
+    if (!info || !info.found) return false;
+    if (info.isPassword || info.formHasPassword) return true;
+    if (info.autocomplete && /^(cc-|transaction-)/i.test(info.autocomplete)) return true;
+    return SENSITIVE_RE.test(info.text || '');
+  }
   function probeInfo(el) {
     if (!el) return { found: false };
     const tag = el.tagName.toLowerCase();
     const text = (el.innerText || el.textContent || el.value || '').trim().slice(0, 120);
     const typeAttr = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
     const isPassword = tag === 'input' && (typeAttr === 'password' || (el.name && /pass/i.test(el.name)));
+    const form = el.form || (el.closest ? el.closest('form') : null);
+    let formHasPassword = false;
+    try { formHasPassword = !!(form && form.querySelector('input[type="password"]')); } catch (_) {}
+    const autocomplete = (el.getAttribute && (el.getAttribute('autocomplete') || '')).toLowerCase();
     const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
     return {
       found: true, tagName: tag, text,
-      type: el.type || typeAttr, isPassword,
+      type: el.type || typeAttr, isPassword, formHasPassword, autocomplete,
       value: (tag === 'input' || tag === 'textarea') ? el.value : undefined,
       rect: r ? { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } : undefined,
     };
@@ -883,6 +1036,11 @@ function bp_exec(args) {
         const el = locate(a);
         if (mode === 'probe') return Object.assign({ success: true, current_url: location.href }, probeInfo(el));
         if (!el) return { success: false, error: '未找到可点击元素，建议先用 browser_get_elements 重新探测', current_url: location.href };
+        /* 安全重检（防 TOCTOU）：probe 判定安全后到 act 执行前，页面可能换掉
+         * 元素。expectSafe 时重新判定，变敏感则中止，由后台重新走确认流程。 */
+        if (a.expectSafe && isSensitiveInfo(probeInfo(el))) {
+          return { success: false, error: '安全重检未通过：目标元素在执行前变为敏感操作，已中止。请重新发起指令以触发用户确认。', current_url: location.href, sensitiveChanged: true };
+        }
         try { el.scrollIntoView({ block: 'center' }); } catch (_) {}
         await sleepP(150);
         try { el.click(); }
@@ -893,6 +1051,9 @@ function bp_exec(args) {
         const el = locate(a);
         if (mode === 'probe') return Object.assign({ success: true, current_url: location.href }, probeInfo(el));
         if (!el) return { success: false, error: '未找到输入元素', current_url: location.href };
+        if (a.expectSafe && isSensitiveInfo(probeInfo(el))) {
+          return { success: false, error: '安全重检未通过：目标元素在执行前变为敏感操作，已中止。请重新发起指令以触发用户确认。', current_url: location.href, sensitiveChanged: true };
+        }
         const value = a.value != null ? String(a.value) : '';
         if (a.clear) { setNativeValue(el, ''); await sleepP(150); }
         let cur = a.clear ? '' : (el.value || '');
@@ -958,6 +1119,12 @@ function bp_exec(args) {
       }
       case 'browser_keypress': {
         const active = document.activeElement || document.body;
+        /* probe 模式：返回焦点元素信息，供后台做敏感判定
+         * （旧版 keypress 完全不经过敏感拦截，AI 可 focus 支付按钮后发 Enter 绕过） */
+        if (mode === 'probe') return Object.assign({ success: true, current_url: location.href }, probeInfo(active));
+        if (a.expectSafe && isSensitiveInfo(probeInfo(active))) {
+          return { success: false, error: '安全重检未通过：焦点元素在执行前变为敏感操作，已中止。请重新发起指令以触发用户确认。', current_url: location.href, sensitiveChanged: true };
+        }
         const mods = a.modifiers || [];
         const codeMap = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39 };
         const code = codeMap[a.keys] || (a.keys ? a.keys.charCodeAt(0) : 0);
@@ -977,36 +1144,6 @@ function bp_exec(args) {
 }
 
 /* -------------------------------------------------------------------------
- * bpShowConfirm — 注入目标页的「敏感操作确认弹窗」，返回 Promise<boolean>
- * ------------------------------------------------------------------------- */
-function bpShowConfirm(message) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
-    const box = document.createElement('div');
-    box.style.cssText = 'background:#fff;color:#222;padding:20px 24px;border-radius:12px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
-    const p = document.createElement('div');
-    p.textContent = message;
-    p.style.cssText = 'margin-bottom:16px;font-size:15px;line-height:1.5;white-space:pre-wrap;';
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
-    const cancel = document.createElement('button');
-    cancel.textContent = '取消';
-    cancel.style.cssText = 'padding:8px 16px;border:1px solid #ccc;background:#f5f5f5;border-radius:8px;cursor:pointer';
-    const ok = document.createElement('button');
-    ok.textContent = '确认执行';
-    ok.style.cssText = 'padding:8px 16px;border:none;background:#e53935;color:#fff;border-radius:8px;cursor:pointer';
-    const cleanup = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
-    cancel.onclick = () => { cleanup(); resolve(false); };
-    ok.onclick = () => { cleanup(); resolve(true); };
-    wrap.appendChild(cancel); wrap.appendChild(ok);
-    box.appendChild(p); box.appendChild(wrap);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-  });
-}
-
-/* -------------------------------------------------------------------------
  * 导航 / 截图（background 直接处理，不走注入）
  * ------------------------------------------------------------------------- */
 async function bpNavigate(args, senderTabId) {
@@ -1014,17 +1151,28 @@ async function bpNavigate(args, senderTabId) {
   if (!target || bpIsAiTab((await getTabSafe(target))?.url)) {
     const t = await chrome.tabs.create({ url: args.url });
     target = t.id;
+    if (target != null) bpOwnedTabs.add(target);
   } else {
     await chrome.tabs.update(target, { url: args.url });
   }
-  await waitForTabLoad(target);
-  bpCtx.targetTabId = target;
+  const loaded = await waitForTabLoad(target);
+  await bpCtxSet({ targetTabId: target });
   const tab = await getTabSafe(target);
-  return { success: true, data: { navigated: true, url: args.url }, current_url: tab ? tab.url : args.url };
+  return {
+    success: true,
+    data: {
+      navigated: true,
+      url: args.url,
+      loaded,
+      note: loaded ? undefined : '页面 15s 内未完成加载，后续操作可能在半加载页面上执行',
+    },
+    current_url: tab ? tab.url : args.url,
+  };
 }
 
 async function bpScreenshot(args, senderTabId) {
-  const target = bpCtx.targetTabId || (await bpPickTarget(args, senderTabId));
+  const ctx = await bpCtxGet();
+  const target = ctx.targetTabId || (await bpPickTarget(args, senderTabId));
   if (!target) return { success: false, error: '没有可截图的目标页', current_url: '' };
   await chrome.tabs.update(target, { active: true });
   await sleep(400);
@@ -1048,27 +1196,34 @@ async function handleBrowserPilot(payload, reply, sender) {
     if (!target) {
       return reply(true, { success: false, error: '未找到目标标签页：请先打开想操作的网页，或先用 browser_navigate 打开。', current_url: '' });
     }
-    bpCtx.targetTabId = target; // 锁定上下文
+    await bpCtxSet({ targetTabId: target }); // 锁定上下文（持久化，SW 重启不丢）
 
-    // 敏感拦截（仅 click / type）
-    if (tool === 'browser_click' || tool === 'browser_type') {
+    /* 敏感拦截：click / type / keypress（keypress 旧版完全绕过拦截）。
+     * probe 与 act 为两次注入；probe 判定安全时给 act 带 expectSafe 标记，
+     * act 注入内做安全重检，缩小 TOCTOU 窗口（页面在 probe 后换掉元素会被拦下）。 */
+    const NEED_GATE = tool === 'browser_click' || tool === 'browser_type' || tool === 'browser_keypress';
+    let expectSafe = false;
+    if (NEED_GATE) {
       const info = await bpInject(target, bp_exec, { tool, mode: 'probe', ...args });
       if (info && info.success && info.found && bpIsSensitive(info)) {
         try {
           chrome.notifications.create({
             type: 'basic', title: 'BrowserPilot 敏感操作待确认',
-            message: '检测到：' + (info.text || info.tagName) + '。请在页面弹窗中点击「确认执行」。',
+            message: '检测到：' + (info.text || info.tagName) + '。请在确认窗口中选择。',
           });
         } catch (_) {}
-        const confirmed = await bpInject(target, bpShowConfirm,
+        // 确认窗在独立扩展窗口（bp-confirm.html），不在目标页 DOM 内
+        const confirmed = await bpAskUserConfirm(
           'BrowserPilot 检测到敏感操作：\n「' + (info.text || info.tagName) + '」\n涉及支付 / 密码 / 发送 / 删除等，确认执行？');
         if (!confirmed) {
           return reply(true, { success: false, error: '用户取消了敏感操作', current_url: info.current_url || '' });
         }
+      } else if (info && info.success && info.found) {
+        expectSafe = true;
       }
     }
 
-    const result = await bpInject(target, bp_exec, { tool, mode: 'act', ...args });
+    const result = await bpInject(target, bp_exec, { tool, mode: 'act', expectSafe, ...args });
     reply(true, result);
   } catch (e) {
     reply(false, null, e && e.message ? e.message : String(e));
@@ -1292,10 +1447,47 @@ async function handleTamperOp(payload, reply) {
  * ========================================================================= */
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const focusNudgeAt = {};    // host -> 上次提醒时间
-const focusNudgeN = {};     // host -> 本次会话提醒次数（习惯化计数）
-const focusDwell = {};      // tabId -> {host, since}  评估中的分心访问
+/* 运行态（提醒/停留/待触发）持久化到 storage.session：
+ * MV3 SW 空闲约 30s 即被终止——旧版这些状态全在内存，
+ * SW 休眠后 dwell 判定静默丢失（破戒不被记录）、pending 的
+ * setTimeout 永不触发。重启后从 storage.session 恢复并重新排定时器。 */
+const focusRt = { nudgeAt: {}, nudgeN: {}, dwell: {}, pending: {} };
+const focusTimers = {}; // tabId -> setTimeout 句柄（句柄本身不可持久化）
 const FOCUS_DWELL_MS = 45000;
+
+function focusRtSave() {
+  try { chrome.storage.session.set({ focusRt }); } catch (_e) { /* 忽略 */ }
+}
+
+/* 为某标签页排提醒定时器（SW 重启恢复时也走这里） */
+function armNudgeTimer(tabId, rec, delayMs) {
+  if (focusTimers[tabId]) clearTimeout(focusTimers[tabId]);
+  focusTimers[tabId] = setTimeout(() => {
+    delete focusTimers[tabId];
+    rec.fired = true;
+    delete focusRt.pending[tabId];
+    focusRtSave();
+    fireNudge(rec.host);
+  }, delayMs);
+}
+
+(async function focusRtLoad() {
+  try {
+    const r = await chrome.storage.session.get({ focusRt: null });
+    if (!r.focusRt) return;
+    focusRt.nudgeAt = r.focusRt.nudgeAt || {};
+    focusRt.nudgeN = r.focusRt.nudgeN || {};
+    focusRt.dwell = r.focusRt.dwell || {};
+    const pend = r.focusRt.pending || {};
+    const now = Date.now();
+    for (const [tabId, p] of Object.entries(pend)) {
+      if (!p || p.fired) continue;
+      focusRt.pending[tabId] = p;
+      // SW 休眠期间已到期的提醒：立即补发（RL 延迟精度让给可用性）
+      armNudgeTimer(Number(tabId), p, Math.max(0, (p.fireAt || now) - now));
+    }
+  } catch (_e) { /* 首次运行无数据 */ }
+})();
 
 /* ---- Backlog：强化学习式提醒时机（reward = 忍住率） ----
  * 观察：很多分心是「手滑点进去、自己两秒就退出来」，提醒反而打扰。
@@ -1303,7 +1495,6 @@ const FOCUS_DWELL_MS = 45000;
  *   - 未提醒就自己离开（resist 且 pending 未触发）→ reward +1 → delay +5s（多给自我纠正的机会）
  *   - 提醒过仍然破戒（broke 且已触发）          → reward −1 → delay −10s（下次更早拦）
  * 初始 0s（立即提醒），随数据自适应。 */
-const focusPending = {};    // tabId -> {host, since, timer, fired}
 let focusNudgeDelay = {};   // host -> 延迟毫秒（持久化到 focusPolicy.delays）
 const NUDGE_DELAY_MIN = 0;
 const NUDGE_DELAY_MAX = 60000;
@@ -1395,9 +1586,14 @@ async function pushFocusEvent(ev) {
 
 /** 关闭并清理某个标签页上待触发的提醒 */
 function clearPending(tabId) {
-  const p = focusPending[tabId];
-  if (p && p.timer) clearTimeout(p.timer);
-  delete focusPending[tabId];
+  if (focusTimers[tabId]) {
+    clearTimeout(focusTimers[tabId]);
+    delete focusTimers[tabId];
+  }
+  if (focusRt.pending[tabId]) {
+    delete focusRt.pending[tabId];
+    focusRtSave();
+  }
 }
 
 /* ---------- Backlog：RL 策略更新（reward ∈ {+1, −1}） ---------- */
@@ -1457,9 +1653,10 @@ async function handleFocusStart(payload, reply) {
     focus: { start, until: start + minutes * 60000, minutes, blocklist, allowlist, mode, pomodoro },
     focusEvents: [], // 新会话清空事件
   });
-  for (const k of Object.keys(focusNudgeAt)) delete focusNudgeAt[k];
-  for (const k of Object.keys(focusNudgeN)) delete focusNudgeN[k];
-  for (const k of Object.keys(focusPending)) clearPending(k);
+  for (const k of Object.keys(focusRt.nudgeAt)) delete focusRt.nudgeAt[k];
+  for (const k of Object.keys(focusRt.nudgeN)) delete focusRt.nudgeN[k];
+  for (const k of Object.keys(focusRt.pending)) clearPending(k);
+  focusRtSave();
   try {
     chrome.alarms.create('hc-focus-end', { when: start + minutes * 60000 });
     chrome.action.setBadgeText({ text: String(minutes) });
@@ -1567,24 +1764,26 @@ async function focusCheckTab(tab) {
 
   const now = Date.now();
   // 状态机：标记「评估中」的访问
-  if (!focusDwell[tab.id] || focusDwell[tab.id].host !== host) {
-    focusDwell[tab.id] = { host, since: now };
+  if (!focusRt.dwell[tab.id] || focusRt.dwell[tab.id].host !== host) {
+    focusRt.dwell[tab.id] = { host, since: now };
+    focusRtSave();
   }
 
   // 该标签页已排程提醒（含 RL 延迟等待中）→ 不再重复排
-  if (focusPending[tab.id] && focusPending[tab.id].host === host) return;
+  if (focusRt.pending[tab.id] && focusRt.pending[tab.id].host === host) return;
 
   // 自适应提醒间隔：90s × 1.35^n，封顶 5 分钟
-  const n = focusNudgeN[host] || 0;
+  const n = focusRt.nudgeN[host] || 0;
   const interval = Math.min(90000 * Math.pow(1.35, n), 300000);
-  if (focusNudgeAt[host] && now - focusNudgeAt[host] < interval) return;
+  if (focusRt.nudgeAt[host] && now - focusRt.nudgeAt[host] < interval) return;
 
   // Backlog：RL 延迟 —— 先等 delay 毫秒，若用户自己离开则不必打扰
   const delay = focusNudgeDelay[host] || 0;
   clearPending(tab.id);
-  const rec = { host, since: now, fired: false, timer: null };
-  rec.timer = setTimeout(() => { rec.fired = true; delete focusPending[tab.id]; fireNudge(host); }, delay);
-  focusPending[tab.id] = rec;
+  const rec = { host, since: now, fireAt: now + delay, fired: false };
+  focusRt.pending[tab.id] = rec;
+  armNudgeTimer(tab.id, rec, delay);
+  focusRtSave();
 }
 
 /* 实际发出提醒（RL 延迟结束后调用） */
@@ -1592,9 +1791,10 @@ async function fireNudge(host) {
   const { focus } = await focusGet({ focus: null });
   if (!focus || focus.until <= Date.now()) return;
   const now = Date.now();
-  const n = focusNudgeN[host] || 0;
-  focusNudgeAt[host] = now;
-  focusNudgeN[host] = n + 1;
+  const n = focusRt.nudgeN[host] || 0;
+  focusRt.nudgeAt[host] = now;
+  focusRt.nudgeN[host] = n + 1;
+  focusRtSave();
   const mins = Math.max(1, Math.round((focus.until - now) / 60000));
   const pool = focus.mode === 'white' ? FOCUS_NUDGE_MSGS_WHITE : FOCUS_NUDGE_MSGS;
   const msg = pool[n % pool.length].replace('{host}', host).replace('{min}', String(mins));
@@ -1609,17 +1809,16 @@ chrome.tabs.onActivated.addListener((ai) => {
   getTabSafe(ai.tabId).then(focusCheckTab);
 });
 
-/* 离开分心站点时评估 dwell：忍住 or 破戒（黑名单/白名单两种模式共用） */
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (!info.url && info.status !== 'complete') return;
-  const d = focusDwell[tabId];
+/* 离开分心站点时评估 dwell：忍住 or 破戒（黑名单/白名单两种模式共用）。
+ * 标签页被直接关闭也算「离开」（旧版只监听导航，关 Tab 时分心永不结算）。 */
+function settleDwell(tabId) {
+  const d = focusRt.dwell[tabId];
   if (!d) return;
-  const host = focusHostOf(tab && tab.url);
-  if (host && (host === d.host || host.endsWith('.' + d.host))) return; // 还在该站
+  delete focusRt.dwell[tabId];
+  focusRtSave();
   const dwellMs = Date.now() - d.since;
-  delete focusDwell[tabId];
   // Backlog：RL 结算 —— 离开瞬间看提醒是否还没触发
-  const pend = focusPending[tabId];
+  const pend = focusRt.pending[tabId];
   const selfRecovered = !!(pend && !pend.fired); // 没等提醒就自己走了
   const wasNudged = !pend || pend.fired;         // 已经提醒过（或本轮无需提醒）
   clearPending(tabId);
@@ -1639,7 +1838,16 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
       await updateNudgePolicy(d.host, -1);                    // 提醒过仍破戒 → 下次更早拦截
     }
   })();
+}
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!info.url && info.status !== 'complete') return;
+  const d = focusRt.dwell[tabId];
+  if (!d) return;
+  const host = focusHostOf(tab && tab.url);
+  if (host && (host === d.host || host.endsWith('.' + d.host))) return; // 还在该站
+  settleDwell(tabId);
 });
+chrome.tabs.onRemoved.addListener((tabId) => settleDwell(tabId));
 
 /* ---------- 结束/到期：生成报告 + 番茄排程 ---------- */
 async function finalizeFocus(auto) {
@@ -1679,8 +1887,9 @@ async function finalizeFocus(auto) {
     },
   });
   try { chrome.action.setBadgeText({ text: '' }); } catch (_e) { /* 忽略 */ }
-  for (const k of Object.keys(focusDwell)) delete focusDwell[k];
-  for (const k of Object.keys(focusPending)) clearPending(k);
+  for (const k of Object.keys(focusRt.dwell)) delete focusRt.dwell[k];
+  for (const k of Object.keys(focusRt.pending)) clearPending(k);
+  focusRtSave();
 
   // 番茄周期：自然到期才排休息
   if (auto && focus.pomodoro && completed) {

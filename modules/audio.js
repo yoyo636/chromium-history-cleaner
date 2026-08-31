@@ -113,7 +113,7 @@
             const emoji = r.kind.includes('广告') || r.kind.includes('噪声') ? '🔊' : r.kind === '人声对话' ? '🗣️' : r.kind === '背景音乐' ? '🎵' : '🔇';
             HC.confirm({
               title: '音频分析结果',
-              body: `${emoji} 识别为：<b>${HC.escapeHtml(r.kind)}</b><br/>音量 ${r.avgEnergy} · 人声带占比 ${r.voiceRatio} · 高频占比 ${r.highRatio}<br/>是否静音该标签？`,
+              bodyHtml: `${emoji} 识别为：<b>${HC.escapeHtml(r.kind)}</b><br/>音量 ${r.avgEnergy} · 人声带占比 ${r.voiceRatio} · 高频占比 ${r.highRatio}<br/>是否静音该标签？`,
               danger: r.kind.includes('广告') || r.kind.includes('噪声'),
             }).then((ok) => {
               if (!ok) return;

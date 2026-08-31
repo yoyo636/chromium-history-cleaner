@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>BrowserPilot 敏感操作确认</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 22px 24px;
+    background: #f4f6fb;
+    color: #1c2333;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #171b26; color: #e8ecf5; }
+    .msg { background: #222839; border-color: #333c55; }
+    .cancel { background: #2a3147; color: #e8ecf5; border-color: #3a4360; }
+  }
+  h1 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: #e53935; flex: none; }
+  .msg {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #dde3ef;
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 10px; justify-content: flex-end; }
+  button {
+    padding: 9px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .cancel { background: #f0f2f7; border-color: #d5dbe8; color: #333; }
+  .ok { background: #e53935; color: #fff; font-weight: 600; }
+  .hint { margin-top: 10px; font-size: 12px; opacity: 0.6; text-align: right; }
+</style>
+</head>
+<body>
+  <h1><span class="dot"></span>BrowserPilot 敏感操作确认</h1>
+  <div class="msg" id="msg">加载中…</div>
+  <div class="row">
+    <button class="cancel" id="cancel">取消（Esc）</button>
+    <button class="ok" id="ok">确认执行（Enter）</button>
+  </div>
+  <div class="hint">此窗口由扩展独立弹出，网页脚本无法代替你点击。</div>
+  <script src="bp-confirm.js"></script>
+</body>
+</html>

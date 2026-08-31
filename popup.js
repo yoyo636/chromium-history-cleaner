@@ -65,6 +65,21 @@
       .replace(/'/g, '&#39;');
   };
 
+  /* 弹窗 body 渲染收口：默认纯文本（textContent，\n 用 pre-wrap 换行，杜绝 XSS）；
+   * 需要富文本（<b>/<br/>）时显式传 bodyHtml，且其中动态内容必须 HC.escapeHtml。
+   * 旧版 body 直接 innerHTML —— 书签标题 / 历史 URL 等存储数据可注入脚本
+   * 到 popup 特权上下文。 */
+  HC.setModalBody = function (b, body, bodyHtml) {
+    if (bodyHtml != null) {
+      b.style.whiteSpace = '';
+      b.innerHTML = bodyHtml;
+    } else {
+      b.style.whiteSpace = 'pre-wrap';
+      b.innerHTML = '';
+      b.textContent = body == null ? '' : String(body);
+    }
+  };
+
   HC.formatTime = function (ts) {
     if (!ts) return '';
     const d = new Date(ts);
@@ -150,7 +165,7 @@
   };
 
   /* ============================ 确认弹窗 ============================ */
-  HC.confirm = function ({ title, body, danger }) {
+  HC.confirm = function ({ title, body, bodyHtml, danger }) {
     return new Promise((resolve) => {
       const mask = document.getElementById('modalMask');
       const t = document.getElementById('modalTitle');
@@ -159,7 +174,7 @@
       const ok = document.getElementById('modalOk');
       const cancel = document.getElementById('modalCancel');
       t.textContent = title || '确认操作';
-      b.innerHTML = body || '';
+      HC.setModalBody(b, body, bodyHtml);
       input.style.display = 'none';
       ok.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
       mask.hidden = false;
@@ -182,7 +197,7 @@
   };
 
   /* ============================ 输入弹窗（替代被禁用的 window.prompt） ============================ */
-  HC.prompt = function ({ title, body, placeholder, value, okText }) {
+  HC.prompt = function ({ title, body, bodyHtml, placeholder, value, okText }) {
     return new Promise((resolve) => {
       const mask = document.getElementById('modalMask');
       const t = document.getElementById('modalTitle');
@@ -191,7 +206,7 @@
       const ok = document.getElementById('modalOk');
       const cancel = document.getElementById('modalCancel');
       t.textContent = title || '请输入';
-      b.innerHTML = body || '';
+      HC.setModalBody(b, body, bodyHtml);
       input.style.display = '';
       input.value = value || '';
       input.placeholder = placeholder || '';

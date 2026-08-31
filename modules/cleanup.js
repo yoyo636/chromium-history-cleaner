@@ -201,7 +201,7 @@
           if (prefs.cleanupConfirm === false) return proceed();
           HC.confirm({
             title: '确认清理？',
-            body: `将清理 <b>${scope[1]}</b> 内的：<b>${picked.join('、')}</b>，<b>不可恢复</b>。`,
+            bodyHtml: `将清理 <b>${scope[1]}</b> 内的：<b>${picked.join('、')}</b>，<b>不可恢复</b>。`,
             danger: true,
           }).then((ok) => ok && proceed());
         });

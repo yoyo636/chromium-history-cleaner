@@ -149,7 +149,7 @@
           if (!ids.length) return HC.toast('未找到匹配域名的标签', 'warn');
           HC.confirm({
             title: '确认关闭？',
-            body: `将关闭 <b>${ids.length}</b> 个域名包含「${HC.escapeHtml(dom)}」的标签。`,
+            bodyHtml: `将关闭 <b>${ids.length}</b> 个域名包含「${HC.escapeHtml(dom)}」的标签。`,
             danger: true,
           }).then((ok) => {
             if (!ok) return;
@@ -176,7 +176,7 @@
         if (!items.length) return HC.toast('没有可存档的标签', 'warn');
         const name = await HC.prompt({
           title: '存档会话',
-          body: `将把 <b>${items.length}</b> 个标签存为会话。给这个会话起个名字：`,
+          bodyHtml: `将把 <b>${items.length}</b> 个标签存为会话。给这个会话起个名字：`,
           value: '会话 ' + new Date().toLocaleString(),
           okText: '存档',
         });

@@ -164,9 +164,11 @@ def upload(zip_path):
     url = UPLOAD_URL
     if cfg.get("item_id"):
         url += "/" + cfg["item_id"]
-    url += "?uploadType=media&access_token=" + urllib.parse.quote(token)
+    url += "?uploadType=media"
 
     req = urllib.request.Request(url, data=payload, method="POST")
+    # access_token 走 Authorization 头，不要放 URL query——query 会进代理/服务器访问日志
+    req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/zip")
     req.add_header("x-goog-api-version", "2")
 
@@ -200,7 +202,7 @@ def main():
         zip_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_ZIP
         if not os.path.exists(zip_path):
             print("✗ 找不到 zip：", zip_path)
-            print("  请先运行 python3 history-cleaner/build_all.py 生成提交包。")
+            print("  请先运行 python3 chromium-history-manager/build_all.py 生成提交包。")
             sys.exit(1)
         upload(zip_path)
     else:
