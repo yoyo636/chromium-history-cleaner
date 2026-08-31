@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器搭子 · Browser Companion</title>
+<meta name="description" content="浏览器搭子：历史清理、标签管理、护眼、性能与 AI 操控，一套代码兼容 Chrome / Edge / Firefox。">
+<style>
+  :root {
+    --bg: #06070d;
+    --ink: #e9edf5;
+    --ink-dim: #8b93a7;
+    --accent: #6ea8ff;
+    --accent2: #9d7bff;
+    --accent3: #5fd4c8;
+    --glass: rgba(255, 255, 255, 0.045);
+    --glass-strong: rgba(255, 255, 255, 0.07);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --radius: 22px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+      "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    line-height: 1.65; overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- 粒子画布 ---------- */
+  #particles {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  }
+  .glow-orb {
+    position: fixed; border-radius: 50%; filter: blur(90px);
+    opacity: .16; pointer-events: none; z-index: 0;
+  }
+  #orb1 { width: 520px; height: 520px; background: #2b5fd9; top: -160px; right: -120px; }
+  #orb2 { width: 420px; height: 420px; background: #7a3fd9; bottom: -140px; left: -120px; opacity: .13; }
+
+  main { position: relative; z-index: 1; }
+
+  /* ---------- 液态玻璃基元 ---------- */
+  .glass {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    box-shadow: 0 8px 32px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08);
+    position: relative; overflow: hidden;
+  }
+  /* 玻璃高光扫过——流光 */
+  .glass::before {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit;
+    background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.07) 46%, rgba(255,255,255,.14) 50%, rgba(255,255,255,.07) 54%, transparent 70%);
+    background-size: 260% 100%;
+    animation: sheen 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes sheen {
+    0%   { background-position: 180% 0; }
+    55%, 100% { background-position: -80% 0; }
+  }
+  /* 顶部虹彩描边 */
+  .glass::after {
+    content: ""; position: absolute; left: 8%; right: 8%; top: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(110,168,255,.6), rgba(157,123,255,.5), transparent);
+    pointer-events: none;
+  }
+
+  /* ---------- 导航 ---------- */
+  nav {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 26px;
+    padding: 10px 12px 10px 22px; z-index: 10;
+    border-radius: 999px;
+    background: rgba(10, 12, 20, 0.55);
+    border: 1px solid rgba(255,255,255,.09);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: 0 10px 40px rgba(0,0,0,.5);
+  }
+  nav .brand { font-weight: 700; font-size: 15px; letter-spacing: .5px; }
+  nav .brand .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent3); margin-right: 9px;
+    box-shadow: 0 0 12px var(--accent3);
+    animation: pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { box-shadow: 0 0 3px var(--accent3); opacity: .6; } }
+  nav a { color: var(--ink-dim); text-decoration: none; font-size: 13.5px; transition: color .2s; }
+  nav a:hover { color: var(--ink); }
+  nav .nav-cta {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; padding: 8px 20px; border-radius: 999px;
+    font-size: 13.5px; font-weight: 600; text-decoration: none;
+    box-shadow: 0 4px 18px rgba(110,168,255,.35);
+    transition: transform .2s, box-shadow .2s;
+  }
+  nav .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 26px rgba(110,168,255,.5); }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    min-height: 92vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+    padding: 140px 24px 80px; position: relative;
+  }
+  .hero .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--accent3);
+    border: 1px solid rgba(95,212,200,.25); background: rgba(95,212,200,.06);
+    padding: 6px 16px; border-radius: 999px; margin-bottom: 28px;
+    backdrop-filter: blur(10px);
+  }
+  .hero h1 {
+    font-size: clamp(38px, 6.5vw, 74px); font-weight: 800;
+    letter-spacing: -1.5px; line-height: 1.12;
+    max-width: 900px;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(100deg, #fff 10%, var(--accent) 40%, var(--accent2) 70%, var(--accent3));
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: gradflow 8s ease-in-out infinite;
+  }
+  @keyframes gradflow { 50% { background-position: 100% 0; } }
+  .hero p.sub {
+    color: var(--ink-dim); font-size: clamp(15px, 1.8vw, 19px);
+    max-width: 640px; margin: 26px auto 0;
+  }
+
+  /* 下载卡片区 */
+  .dl-row {
+    display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;
+    margin-top: 52px;
+  }
+  .dl-card {
+    width: 300px; padding: 26px 26px 22px; text-align: left;
+    transition: transform .3s cubic-bezier(.2,.8,.2,1), background .3s;
+  }
+  .dl-card:hover { transform: translateY(-6px); background: var(--glass-strong); }
+  .dl-card .os { font-size: 13px; color: var(--ink-dim); margin-bottom: 8px; }
+  .dl-card .name { font-size: 19px; font-weight: 700; margin-bottom: 4px; }
+  .dl-card .meta { font-size: 12.5px; color: var(--ink-dim); margin-bottom: 18px; min-height: 38px; }
+  .dl-btn {
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    width: 100%; padding: 12px 0; border-radius: 14px;
+    font-size: 14.5px; font-weight: 600; text-decoration: none; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.12);
+    background: linear-gradient(135deg, rgba(110,168,255,.16), rgba(157,123,255,.16));
+    color: var(--ink); transition: all .25s;
+    -webkit-user-select: none; user-select: none;
+  }
+  .dl-btn:hover {
+    background: linear-gradient(135deg, rgba(110,168,255,.3), rgba(157,123,255,.3));
+    border-color: rgba(110,168,255,.4); box-shadow: 0 6px 24px rgba(110,168,255,.25);
+  }
+  .dl-btn:active { transform: scale(.97); }
+  .dl-btn svg { width: 16px; height: 16px; }
+  .dl-card .hint { font-size: 11.5px; color: var(--ink-dim); margin-top: 12px; text-align: center; }
+  .dl-card .hint code { color: var(--accent3); }
+
+  .hero .scroll-cue {
+    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+    color: var(--ink-dim); font-size: 12px; letter-spacing: 3px;
+    animation: float 2.4s ease-in-out infinite;
+  }
+  @keyframes float { 50% { transform: translate(-50%, 8px); opacity: .5; } }
+
+  /* ---------- 区块通用 ---------- */
+  section { padding: 90px 24px; max-width: 1180px; margin: 0 auto; }
+  .sec-head { text-align: center; margin-bottom: 54px; }
+  .sec-head .kicker {
+    font-size: 12.5px; letter-spacing: 4px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+  }
+  .sec-head h2 { font-size: clamp(26px, 3.5vw, 40px); font-weight: 800; letter-spacing: -0.5px; }
+  .sec-head p { color: var(--ink-dim); margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto; }
+
+  /* ---------- 功能网格 ---------- */
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 18px;
+  }
+  .feat {
+    padding: 28px; transition: transform .3s, background .3s;
+  }
+  .feat:hover { transform: translateY(-4px); background: var(--glass-strong); }
+  .feat .icon {
+    width: 46px; height: 46px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; margin-bottom: 16px;
+    background: linear-gradient(135deg, rgba(110,168,255,.18), rgba(157,123,255,.14));
+    border: 1px solid rgba(255,255,255,.1);
+  }
+  .feat h3 { font-size: 17px; margin-bottom: 8px; }
+  .feat p { font-size: 13.5px; color: var(--ink-dim); }
+
+  /* ---------- AI 操控展示 ---------- */
+  .bp-wrap {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  }
+  .bp-panel { padding: 30px; }
+  .bp-panel h3 { font-size: 18px; margin-bottom: 14px; }
+  .bp-panel p { font-size: 14px; color: var(--ink-dim); margin-bottom: 16px; }
+  .bp-panel ul { list-style: none; }
+  .bp-panel li {
+    font-size: 13.5px; color: var(--ink-dim); padding: 7px 0 7px 26px; position: relative;
+  }
+  .bp-panel li::before {
+    content: "✓"; position: absolute; left: 0; color: var(--accent3); font-weight: 700;
+  }
+  .chat-demo { padding: 26px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+  .chat-line { margin-bottom: 14px; opacity: 0; transform: translateY(8px); animation: chatin .5s forwards; }
+  .chat-line .who { color: var(--accent2); font-weight: 600; }
+  .chat-line.user .who { color: var(--accent3); }
+  .chat-line.tool .who { color: var(--accent); }
+  .chat-line .msg { color: var(--ink-dim); white-space: pre-wrap; word-break: break-all; }
+  @keyframes chatin { to { opacity: 1; transform: none; } }
+  .cursor-blink { display: inline-block; width: 7px; height: 14px; background: var(--accent3);
+    vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---------- 隐私条 ---------- */
+  .privacy-strip {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 20px 30px; font-size: 14px; color: var(--ink-dim);
+  }
+  .privacy-strip .shield {
+    width: 38px; height: 38px; border-radius: 12px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 19px;
+    background: linear-gradient(135deg, rgba(95,212,200,.2), rgba(110,168,255,.14));
+    border: 1px solid rgba(95,212,200,.25);
+  }
+
+  /* ---------- 页脚 ---------- */
+  footer {
+    border-top: 1px solid rgba(255,255,255,.06);
+    padding: 40px 24px; text-align: center; color: var(--ink-dim); font-size: 13px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer .row { margin-bottom: 8px; }
+
+  /* ---------- 滚动入场 ---------- */
+  .reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s, transform .7s; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (max-width: 880px) {
+    .bp-wrap { grid-template-columns: 1fr; }
+    nav .nav-links { display: none; }
+    .dl-card { width: 100%; max-width: 340px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="particles"></canvas>
+<div class="glow-orb" id="orb1"></div>
+<div class="glow-orb" id="orb2"></div>
+
+<nav>
+  <span class="brand"><span class="dot"></span>浏览器搭子</span>
+  <span class="nav-links">
+    <a href="#features">功能</a>
+    <a href="#browserpilot">AI 操控</a>
+    <a href="#privacy">隐私</a>
+    <a href="#download">下载</a>
+  </span>
+  <a class="nav-cta" href="#download">立即获取</a>
+</nav>
+
+<main>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="badge">✦ v4.10 · 开源 · 全平台 · 本地处理</div>
+    <h1>给浏览器的<br><span class="grad">十二位搭子</span></h1>
+    <p class="sub">历史清理、标签管理、护眼引擎、性能透视、隐私加固，以及让网页端 AI 安全操控浏览器的 BrowserPilot——一个弹窗，全部搞定。</p>
+
+    <div class="dl-row" id="download">
+      <div class="glass dl-card">
+        <div class="os">Chromium 内核</div>
+        <div class="name">Chromium 版</div>
+        <div class="meta" id="meta-chromium">Chrome · Edge · Opera · Brave · Arc<br>加载中…</div>
+        <a class="dl-btn" id="dl-chromium" href="/api/download?target=chromium">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载安装包
+        </a>
+        <div class="hint">解压后 <code>chrome://extensions</code> → 开发者模式 → 加载已解压的扩展</div>
+      </div>
+      <div class="glass dl-card">
+        <div class="os">Gecko 内核</div>
+        <div class="name">Firefox 版</div>
+        <div class="meta" id="meta-firefox">Firefox 126+<br>加载中…</div>
+        <a class="dl-btn" id="dl-firefox" href="/api/download?target=firefox">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载安装包
+        </a>
+        <div class="hint"><code>about:debugging</code> → 临时加载附加组件（AI 操控仅 Chromium 版）</div>
+      </div>
+    </div>
+
+    <div class="scroll-cue">SCROLL</div>
+  </header>
+
+  <!-- 功能 -->
+  <section id="features">
+    <div class="sec-head reveal">
+      <div class="kicker">Features</div>
+      <h2>十二个模块，各司其职</h2>
+      <p>每个模块都为「真实可运行」而设计——没有占位符，没有注水代码。</p>
+    </div>
+    <div class="grid">
+      <div class="glass feat reveal"><div class="icon">📜</div><h3>历史管理</h3><p>按时间范围全量查询（突破 API 千条限制）、实时过滤、多选 / 单条 / 按段删除、JSON / CSV 导出。</p></div>
+      <div class="glass feat reveal"><div class="icon">🗂️</div><h3>标签管家</h3><p>批量关闭、去重、按域名关闭、复制网址、会话存档——乱糟糟的标签页一键归位。</p></div>
+      <div class="glass feat reveal"><div class="icon">👁️</div><h3>护眼引擎</h3><p>自研「观息」疲劳引擎：鼠标 / 滚动 / 键盘节奏 → Welford 在线统计 + P² 分位估计 → 1–5 级疲劳，30 秒渐进调整排版。</p></div>
+      <div class="glass feat reveal"><div class="icon">⚡</div><h3>性能透视</h3><p>每标签 CPU 繁忙度、堆内存、帧率一目了然；一键冻结或关闭高耗能标签，持续高负载预警。</p></div>
+      <div class="glass feat reveal"><div class="icon">🛡️</div><h3>隐私加固</h3><p>监控 Canvas / WebGL 指纹调用、跨站追踪图谱，一键随机化指纹输出——全部在本地完成。</p></div>
+      <div class="glass feat reveal"><div class="icon">🔊</div><h3>音频静音</h3><p>识别所有发声标签，频谱分类（人声 / 音乐 / 广告），智能静音 + 域名记忆。</p></div>
+      <div class="glass feat reveal"><div class="icon">🔖</div><h3>书签去重</h3><p>按网址去重、死链 HEAD 探测、导出 JSON / HTML。</p></div>
+      <div class="glass feat reveal"><div class="icon">🧹</div><h3>数据清理</h3><p>先扫描真实磁盘占用（含下载 GB 数），经确认后清理缓存 / Cookie / 历史，清理后自动复扫验证。</p></div>
+      <div class="glass feat reveal"><div class="icon">📊</div><h3>访问统计</h3><p>Top 域名与页面条形图，7 / 30 / 90 天或全时段。</p></div>
+      <div class="glass feat reveal"><div class="icon">🎯</div><h3>专注模式</h3><p>威胁评分 + 时段敏感性 + 强化学习提醒时机；事件回放时间轴、分心原因速记。</p></div>
+      <div class="glass feat reveal"><div class="icon">💾</div><h3>会话存档</h3><p>恢复最近关闭的标签 / 窗口，自定义会话随时存取。</p></div>
+      <div class="glass feat reveal"><div class="icon">⬇️</div><h3>下载管理</h3><p>查看、打开文件 / 所在文件夹、按条件移除记录。</p></div>
+    </div>
+  </section>
+
+  <!-- BrowserPilot -->
+  <section id="browserpilot">
+    <div class="sec-head reveal">
+      <div class="kicker">BrowserPilot</div>
+      <h2>让网页端 AI 安全地替你操作浏览器</h2>
+      <p>在 Kimi / DeepSeek / MiniMax 里说一句话，AI 就能点击、输入、滚动、读取页面——每一步都在确认协议之下。</p>
+    </div>
+    <div class="bp-wrap">
+      <div class="glass bp-panel reveal">
+        <h3>安全模型</h3>
+        <p>BrowserPilot 的每一层都为「不出事」设计：</p>
+        <ul>
+          <li>白名单站点：仅三个 AI 对话页可注入桥接协议</li>
+          <li>目标页锁定：操作只作用于你指定的非 AI 标签页</li>
+          <li>敏感操作双确认：AI 先文字确认，插件再弹独立确认窗</li>
+          <li>TOCTOU 复核：确认后重验目标元素与页面</li>
+          <li>无任意执行：<code style="color:var(--accent3)">browser_execute</code> 刻意不实现</li>
+          <li>默认关闭：不开开关，桥接一行代码都不会跑</li>
+        </ul>
+      </div>
+      <div class="glass chat-demo reveal" id="chat-demo">
+        <div class="chat-line user" style="animation-delay:.2s"><span class="who">你 ›</span> <span class="msg">帮我在京东搜索 iPhone 15，打开第一个商品</span></div>
+        <div class="chat-line tool" style="animation-delay:.9s"><span class="who">tool_call ›</span> <span class="msg">{"tool":"browser_navigate","args":{"url":"https://www.jd.com"}}</span></div>
+        <div class="chat-line tool" style="animation-delay:1.6s"><span class="who">tool_result ›</span> <span class="msg">{"success":true,"current_url":"https://www.jd.com/"}</span></div>
+        <div class="chat-line tool" style="animation-delay:2.3s"><span class="who">tool_call ›</span> <span class="msg">{"tool":"browser_type","args":{"selector":"#search-input","value":"iPhone 15","pressEnter":true}}</span></div>
+        <div class="chat-line tool" style="animation-delay:3s"><span class="who">tool_result ›</span> <span class="msg">{"success":true,"current_url":"https://search.jd.com/…"}</span></div>
+        <div class="chat-line" style="animation-delay:3.7s"><span class="who">AI ›</span> <span class="msg">已打开「Apple iPhone 15」商品页 ✓ <span class="cursor-blink"></span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 隐私 -->
+  <section id="privacy">
+    <div class="sec-head reveal">
+      <div class="kicker">Privacy</div>
+      <h2>数据不出你的设备</h2>
+    </div>
+    <div class="glass privacy-strip reveal">
+      <div class="shield">🛡️</div>
+      <div>
+        没有服务端 · 没有分析 SDK · 没有外部 CDN · 删除必经二次确认<br>
+        <a href="/privacy.html" style="color:var(--accent);text-decoration:none;">阅读完整隐私政策 →</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="row">浏览器搭子 · Browser Companion v<span id="ver">4.10</span> · <a href="https://github.com/yoyo636/chromium-history-cleaner">GitHub 开源</a></div>
+  <div class="row">安装包下载次数：<span id="dl-count">…</span> · 服务由本地 server.py 提供</div>
+</footer>
+
+<script>
+"use strict";
+
+/* ================= 粒子流场 =================
+ * 流速向量场 + 鼠标扰动：粒子沿场流动，靠近鼠标被推开。
+ * 深色底、微弱连线，克制不喧闹。
+ */
+(function particleFlow() {
+  var canvas = document.getElementById("particles");
+  var ctx = canvas.getContext("2d");
+  var W, H, DPR;
+  var N = 90;               // 粒子数（按屏宽自适应）
+  var LINK_DIST = 110;      // 连线距离
+  var mouse = { x: -9999, y: -9999 };
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function resize() {
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    N = Math.max(50, Math.min(130, Math.round(W / 14)));
+  }
+  resize();
+  addEventListener("resize", resize);
+  addEventListener("pointermove", function (e) { mouse.x = e.clientX; mouse.y = e.clientY; });
+  addEventListener("pointerleave", function () { mouse.x = -9999; mouse.y = -9999; });
+
+  // 速度场：叠加三个大漩涡 + 水平静流，时间缓慢演化
+  function field(x, y, t) {
+    var vx = 0.18, vy = 0;
+    var vortices = [
+      { x: W * 0.22, y: H * 0.30, r: 300, s: 0.55, ph: 0 },
+      { x: W * 0.78, y: H * 0.62, r: 260, s: -0.45, ph: 2 },
+      { x: W * 0.50, y: H * 0.85, r: 220, s: 0.35, ph: 4 },
+    ];
+    for (var i = 0; i < vortices.length; i++) {
+      var v = vortices[i];
+      var dx = x - v.x, dy = y - v.y;
+      var d2 = dx * dx + dy * dy;
+      var r2 = v.r * v.r;
+      if (d2 < r2) {
+        var fall = 1 - Math.sqrt(d2 / r2);          // 越近越强
+        var wob = 0.75 + 0.25 * Math.sin(t * 0.0004 + v.ph);
+        vx += v.s * fall * wob * (-dy / v.r);
+        vy += v.s * fall * wob * (dx / v.r);
+      }
+    }
+    // 鼠标斥力
+    var mdx = x - mouse.x, mdy = y - mouse.y;
+    var md2 = mdx * mdx + mdy * mdy;
+    if (md2 < 120 * 120 && md2 > 0.01) {
+      var mfall = 1 - Math.sqrt(md2) / 120;
+      var inv = 1 / Math.sqrt(md2);
+      vx += mdx * inv * mfall * 1.6;
+      vy += mdy * inv * mfall * 1.6;
+    }
+    return { vx: vx, vy: vy };
+  }
+
+  var parts = [];
+  function spawn(i) {
+    parts[i] = {
+      x: Math.random() * W, y: Math.random() * H,
+      px: 0, py: 0, life: 200 + Math.random() * 300,
+      hue: Math.random() < 0.7
+        ? "rgba(140,170,255,"      // 蓝
+        : "rgba(157,123,255,",     // 紫
+    };
+  }
+  for (var i = 0; i < 130; i++) spawn(i);
+
+  function step(t) {
+    ctx.clearRect(0, 0, W, H);
+    // 位置更新 + 拖尾
+    for (var i = 0; i < N; i++) {
+      var p = parts[i];
+      p.px = p.x; p.py = p.y;
+      var f = field(p.x, p.y, t);
+      p.x += f.vx; p.y += f.vy;
+      p.life--;
+      if (p.life < 0 || p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
+        spawn(i); p.px = p.x; p.py = p.y;
+        continue;
+      }
+      // 粒子头
+      ctx.fillStyle = p.hue + "0.55)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.3, 0, 6.2832);
+      ctx.fill();
+      // 运动拖尾
+      var dx = p.x - p.px, dy = p.y - p.py;
+      if (dx * dx + dy * dy > 0.5) {
+        ctx.strokeStyle = p.hue + "0.25)";
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+      }
+    }
+    // 近邻连线（O(N²) 但 N≤130，开销可忽略）
+    for (var a = 0; a < N; a++) {
+      for (var b = a + 1; b < N; b++) {
+        var pa = parts[a], pb = parts[b];
+        var ddx = pa.x - pb.x, ddy = pa.y - pb.y;
+        var d2 = ddx * ddx + ddy * ddy;
+        if (d2 < LINK_DIST * LINK_DIST) {
+          var alpha = 0.10 * (1 - Math.sqrt(d2) / LINK_DIST);
+          ctx.strokeStyle = "rgba(150,175,255," + alpha + ")";
+          ctx.lineWidth = 0.6;
+          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+        }
+      }
+    }
+    if (!reduce) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+})();
+
+/* ================= 版本 / 下载元信息 ================= */
+(function meta() {
+  function fmtSize(kb) { return kb >= 1024 ? (kb / 1024).toFixed(1) + " MB" : kb + " KB"; }
+  function fmtDate(ts) {
+    var d = new Date(ts * 1000);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+  fetch("/api/version").then(function (r) { return r.json(); }).then(function (v) {
+    document.getElementById("ver").textContent = v.version;
+    ["chromium", "firefox"].forEach(function (k) {
+      var p = v.packages && v.packages[k];
+      if (!p) return;
+      var el = document.getElementById("meta-" + k);
+      if (el) el.innerHTML =
+        p.browsers.replace(/</g, "&lt;") + "<br>约 " + fmtSize(p.size_kb) + " · 更新 " + fmtDate(p.mtime);
+    });
+  }).catch(function () {});
+  fetch("/api/stats").then(function (r) { return r.json(); }).then(function (s) {
+    document.getElementById("dl-count").textContent = s.total || 0;
+  }).catch(function () {});
+})();
+
+/* ================= 滚动入场 ================= */
+(function revealOnScroll() {
+  var els = document.querySelectorAll(".reveal");
+  if (!("IntersectionObserver" in window)) {
+    els.forEach(function (e) { e.classList.add("in"); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+    });
+  }, { threshold: 0.12 });
+  els.forEach(function (e) { io.observe(e); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>隐私政策 · 浏览器搭子</title>
+<style>
+  :root { color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root { color-scheme: dark; }
+    body { background:#10131c; color:#e8eaf0; }
+    .card { background:#1a1f2e; border-color:#2c3348; }
+    code { background:#0d1020; }
+    a { color:#8ab0ff; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f4f6fb; color: #1d2230; line-height: 1.7; padding: 40px 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .card {
+    background: #fff; border: 1px solid #e3e8f2; border-radius: 16px;
+    padding: 40px 44px; box-shadow: 0 10px 40px rgba(31,38,80,.08);
+  }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .meta { color: #5b6472; font-size: 13px; margin-bottom: 8px; }
+  h2 { font-size: 19px; margin: 30px 0 10px; padding-top: 14px; border-top: 1px solid #eef1f7; }
+  h3 { font-size: 15px; margin: 18px 0 8px; }
+  p, li { font-size: 14.5px; }
+  ul { padding-left: 22px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid #e3e8f2; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f4f6fb; }
+  code { background: #eef1f7; padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  .tldr { background:#f0f7ff; border:1px solid #cfe3ff; border-radius:12px; padding:14px 18px; margin: 16px 0; }
+  .contact { margin-top: 30px; padding-top: 14px; border-top: 1px solid #eef1f7; font-size: 13px; color:#5b6472; }
+  .tag { display:inline-block; background:#eef4ff; color:#3b6fd4; border-radius:999px; padding:1px 10px; font-size:12px; margin-left:8px; }
+  @media (max-width: 640px) {
+    .card { padding: 24px 20px; }
+    th, td { font-size: 12.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>隐私政策 <span class="tag">Privacy Policy</span></h1>
+    <div class="meta">适用扩展：浏览器搭子 · 历史与标签页管家（Browser Companion）<br>
+    版本 v4.10 · 生效日期：2026 年 8 月 31 日<br>
+    开源仓库：<a href="https://github.com/yoyo636/chromium-history-cleaner">github.com/yoyo636/chromium-history-cleaner</a></div>
+
+    <div class="tldr">
+      <strong>重要声明：</strong>本扩展<strong>不在任何服务器上收集、存储、传输或出售任何用户数据</strong>。
+      所有数据处理均在您的本地设备（浏览器）内完成。扩展不含分析/广告 SDK、追踪器或第三方代码，也不加载外部 CDN。
+    </div>
+
+    <h2>一、我们收集与处理的数据</h2>
+    <p>本扩展仅在<strong>您主动操作对应功能时</strong>，通过浏览器官方 API 读取本地数据，用于实现您所请求的功能。具体如下：</p>
+    <table>
+      <tr><th>数据类别</th><th>用途</th><th>是否离开设备</th></tr>
+      <tr><td>浏览历史（时间 / 标题 / URL）</td><td>「历史」查询、删除、导出；「统计」访问分析</td><td>否</td></tr>
+      <tr><td>标签页信息</td><td>标签批量关闭、去重、会话存档</td><td>否</td></tr>
+      <tr><td>书签数据</td><td>去重、死链检测、导出、删除</td><td>否</td></tr>
+      <tr><td>下载记录</td><td>下载管理；清理页显示真实占用</td><td>否</td></tr>
+      <tr><td>浏览数据（缓存 / Cookie / 历史等）</td><td>仅在你确认后清除；<strong>不读取不保存内容</strong></td><td>否</td></tr>
+      <tr><td>会话存档（URL 列表）</td><td>会话保存 / 恢复，存于扩展本地存储</td><td>否</td></tr>
+      <tr><td>网页交互信号（鼠标 / 滚动 / 键盘节奏 / 长任务 / 帧率）</td><td>护眼与性能模块本地计算</td><td>否</td></tr>
+      <tr><td>指纹调用事件（Canvas / WebGL 读取）</td><td>隐私模块本地报告与一键加固</td><td>否</td></tr>
+      <tr><td>目标网页内容（页面文本 / 元素信息 / 截图），仅 Chromium 版</td><td>「AI 操控」把页面读取结果注入您正在进行的 AI 对话；插件自身不调用 AI 服务、不主动联网，内容仅在您随后发送消息时到达您所选 AI 服务商（见第四节）</td><td>仅经您的对话发送</td></tr>
+      <tr><td>偏好设置</td><td>主题 / 时间范围 / 开关，存于扩展本地存储</td><td>否</td></tr>
+    </table>
+    <p><strong>明确不收集：</strong>姓名、邮箱、账号、密码、支付信息、真实身份等任何可定位到个人的标识。</p>
+
+    <h2>二、无痕（隐身）模式说明</h2>
+    <p>无痕模式下产生的记录同样仅存于本地，并按浏览器无痕规则处理。「隐私」模块会标注指纹调用是否发生在无痕模式，帮助您识别试图穿透无痕的站点。注意：无痕模式本身无法阻止指纹识别，「一键加固」可在本地随机化 Canvas / WebGL 指纹以降低风险。</p>
+
+    <h2>三、数据的存储与保留</h2>
+    <ul>
+      <li>扩展数据（偏好、会话、疲劳曲线、隐私事件、性能快照）保存在浏览器本地 <code>chrome.storage.local</code>，<strong>不上传任何远程服务器</strong>。</li>
+      <li>浏览器内置数据（历史、书签、下载）由浏览器自身管理。</li>
+      <li>您可随时：在「隐私」页清空记录、在「会话」页删除存档；<strong>卸载扩展即清除全部本地数据</strong>。</li>
+    </ul>
+
+    <h2>四、数据共享与第三方</h2>
+    <ul>
+      <li><strong>不</strong>向任何第三方出售、出租或共享数据；本扩展无服务端，开发者无法接触您的数据。</li>
+      <li>无第三方分析 / 广告 / 崩溃上报 SDK；代码全部内嵌，不加载外部脚本或 CDN。</li>
+      <li>插件自身发起的网络请求仅两类：① 书签「死链检测」对书签 URL 发起 HEAD 探测（仅传输该 URL 本身）；② 「AI 操控」的协议文档从扩展包内资源加载（不外发数据）。</li>
+      <li><strong>需知晓的例外（仅 Chromium 版「AI 操控」）</strong>：该功能会把读取到的页面文本 / 元素信息 / 截图注入您的 AI 对话，随您下一次发送到达所选 AI 服务商——与您手动复制粘贴页面内容给 AI 的路径相同。功能默认关闭；敏感操作（支付 / 密码 / 发送 / 删除）会先弹独立确认窗。插件不接入任何 AI API、不中转数据。</li>
+    </ul>
+
+    <h2>五、权限说明</h2>
+    <table>
+      <tr><th>权限</th><th>用途</th></tr>
+      <tr><td><code>history</code></td><td>历史查询、删除、导出</td></tr>
+      <tr><td><code>tabs</code> / <code>sessions</code></td><td>标签管理、最近关闭恢复、会话存档</td></tr>
+      <tr><td><code>bookmarks</code></td><td>书签去重、死链检测、导出、删除</td></tr>
+      <tr><td><code>downloads</code></td><td>下载记录管理、文件导出</td></tr>
+      <tr><td><code>browsingData</code></td><td>经确认后清除浏览数据（缓存 / Cookie 等）</td></tr>
+      <tr><td><code>tabCapture</code></td><td>「音频」模块在您点击「分析」后识别当前标签音频（需用户触发）</td></tr>
+      <tr><td><code>scripting</code> + <code>host_permissions</code></td><td>隐私指纹监控 / 加固、护眼 / 性能内容脚本、AI 操控在指定目标页执行操作</td></tr>
+      <tr><td><code>activeTab</code></td><td>AI 操控操作您当前交互的标签页时获取临时访问权</td></tr>
+      <tr><td><code>cookies</code></td><td>清理模块统计各站点 Cookie 数量（仅计数，不读取值）</td></tr>
+      <tr><td><code>alarms</code></td><td>定时触发护眼休息提醒与高负载预警</td></tr>
+      <tr><td><code>notifications</code></td><td>高负载与自动静音提醒</td></tr>
+      <tr><td><code>storage</code></td><td>本地保存偏好、会话、统计数据</td></tr>
+    </table>
+
+    <h2>六、儿童隐私</h2>
+    <p>本扩展不面向 13 岁以下儿童设计，不故意收集儿童个人信息。</p>
+
+    <h2>七、政策变更</h2>
+    <p>政策变更将在本页面与商店页面同步更新并标注新的生效日期。</p>
+
+    <h2>八、联系我们</h2>
+    <p>任何疑问请通过 GitHub Issues 联系：<a href="https://github.com/yoyo636/chromium-history-cleaner/issues">github.com/yoyo636/chromium-history-cleaner/issues</a></p>
+
+    <div class="contact">本隐私政策最后更新：2026 年 8 月 31 日。English version: <a href="./PRIVACY_POLICY_EN.md">PRIVACY_POLICY_EN.md</a></div>
+  </div>
+</div>
+</body>
+</html>
