@@ -111,7 +111,7 @@
   };
 
   /* ============================ 偏好设置（storage） ============================ */
-  HC.DEFAULT_PREFS = { theme: 'system', defRange: '7', cleanupConfirm: true };
+  HC.DEFAULT_PREFS = { theme: 'dark', defRange: '7', cleanupConfirm: true };
   HC.getPrefs = function () {
     return new Promise((res) =>
       chrome.storage.local.get({ hcPrefs: HC.DEFAULT_PREFS }, (r) =>
@@ -239,10 +239,11 @@
   ];
   let moreOpen = false;
 
-  function initMorePanel() {
+  /* 「房地产开发」为密码解锁的隐藏入口（设置里开启，类似开发者选项） */
+  function buildMorePanel(views) {
     const panel = document.getElementById('morePanel');
     panel.innerHTML = '';
-    MORE_VIEWS.forEach(([v, t, d]) => {
+    views.forEach(([v, t, d]) => {
       panel.appendChild(
         HC.el('button', {
           class: 'more-item',
@@ -257,6 +258,18 @@
       );
     });
   }
+
+  function initMorePanel() {
+    chrome.storage.local.get({ reEstateUnlocked: false }, (r) => {
+      const views = MORE_VIEWS.slice();
+      if (r.reEstateUnlocked) {
+        views.splice(views.length - 1, 0, ['realestate', '🏠 房地产开发', '房贷 / 税费 / 租金回报']);
+      }
+      buildMorePanel(views);
+    });
+  }
+  // 供设置模块在解锁 / 关闭后立即刷新「更多」面板
+  window.__refreshMorePanel = initMorePanel;
 
   function openMore() {
     const panel = document.getElementById('morePanel');
