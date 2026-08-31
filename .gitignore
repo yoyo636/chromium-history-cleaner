@@ -6,6 +6,8 @@ dist-chromium/
 .tmp/
 node_modules/
 
-# 打包输出（在仓库上级 dist-packages/，也不进本仓库）
+# 打包输出（本地在仓库上级 dist-packages/；--web 模式在 website/dist-packages/，均不进仓库）
 *.zip
+website/dist-packages/
+website/site/.stats.json
 .DS_Store

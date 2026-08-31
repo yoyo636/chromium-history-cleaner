@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """build_all.py — 生成各商店可提交的扩展安装包
 
-产物（输出到 ../dist-packages/，不进 Git 仓库）：
+产物（默认输出到 ../dist-packages/，不进 Git 仓库）：
   browser-companion-chromium.zip  适用于 Chrome / Edge / Opera / Tabbit / Brave / Arc 等
   browser-companion-firefox.zip   适用于 Firefox（AMO）
 
 用法：
-  python3 build_all.py
+  python3 build_all.py           # 输出到 ../dist-packages/（本地/商店上传）
+  python3 build_all.py --web     # 输出到 website/dist-packages/（云部署官网用，
+                                 # server.py 启动前由云平台构建命令自动运行）
 """
 
 import json
@@ -16,12 +18,14 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(os.path.dirname(ROOT), 'dist-packages')
+WEB_OUT_DIR = os.path.join(ROOT, 'website', 'dist-packages')
+OUT_DIR = WEB_OUT_DIR if '--web' in sys.argv else os.path.join(os.path.dirname(ROOT), 'dist-packages')
 EXCLUDE = {
     '.git', 'node_modules', '__pycache__', 'dist-firefox', 'dist-chromium',
     'dist-packages', 'manifest.firefox.json', 'build_firefox.py', 'build_all.py',
     'upload.py', 'upload_cws.py', 'sync_github.py',
     'generate_icons.py', 'listing-preview.html',
+    'website',
 }
 
 # Firefox 版不含 BrowserPilot：gecko manifest 未注册 content-bridge，

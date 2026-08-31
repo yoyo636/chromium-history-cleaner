@@ -25,8 +25,13 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(ROOT)
 SITE_DIR = os.path.join(ROOT, "site")
-# build_all.py 输出到仓库同级目录 ../dist-packages（不进 Git 仓库）
-DIST_DIR = os.environ.get("DIST_DIR") or os.path.join(os.path.dirname(REPO_DIR), "dist-packages")
+# 查找安装包：优先 DIST_DIR 环境变量 → 仓库内 website/dist-packages（云部署，
+# 由构建命令 python3 build_all.py --web 生成）→ 本机仓库同级 ../dist-packages
+_DEFAULTS = [
+    os.path.join(ROOT, "dist-packages"),
+    os.path.join(os.path.dirname(REPO_DIR), "dist-packages"),
+]
+DIST_DIR = os.environ.get("DIST_DIR") or next((d for d in _DEFAULTS if os.path.isdir(d)), _DEFAULTS[0])
 STATS_PATH = os.path.join(SITE_DIR, ".stats.json")
 
 PACKAGES = {
@@ -48,13 +53,24 @@ VERSION_RE = re.compile(r'"version"\s*:\s*"([^"]+)"')
 
 
 def read_manifest_version():
+    # 云部署时仓库根可能不存在（只上传 website/），内置兜底版本
     mf = os.path.join(REPO_DIR, "manifest.json")
     try:
         with open(mf, encoding="utf-8") as f:
             m = VERSION_RE.search(f.read())
             return m.group(1) if m else "unknown"
     except OSError:
-        return "unknown"
+        pass
+    # 仓库根无 manifest.json 时（如只部署 website/ 目录），从 zip 里读
+    p = PACKAGES.get("chromium") or {}
+    try:
+        with zipfile.ZipFile(p.get("path", "")) as z:
+            m = VERSION_RE.search(z.read("manifest.json").decode("utf-8"))
+            if m:
+                return m.group(1)
+    except (OSError, ValueError, KeyError):
+        pass
+    return "unknown"
 
 
 def load_stats():

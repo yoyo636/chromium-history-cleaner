@@ -22,6 +22,32 @@ website/
 | `GET /api/download?target=firefox` | 直链下载 Firefox 版 zip（计入统计） |
 | `GET /api/stats` | 下载计数（存 `site/.stats.json`） |
 
+## Render 部署（推荐，免费档即可）
+
+仓库已含 `render.yaml`，在 Render 控制台 **New → Web Service → 连接 GitHub 仓库** 即可自动识别配置。若手动填写，各项如下：
+
+| 表单项 | 填写值 |
+|--------|--------|
+| Language（运行环境） | **Python 3**（不是 Node.js！后端无任何 npm 依赖） |
+| Branch | `main` |
+| Root Directory | 留空（构建命令需访问仓库根） |
+| Build Command | `python3 build_all.py --web` |
+| Start Command | `python3 website/server.py` |
+| Health Check Path | `/api/version` |
+
+原理：`--web` 会把两个安装包 zip 生成到 `website/dist-packages/`（Render 构建时创建，运行时读取），`server.py` 自动优先使用该目录。注意 Render 免费档重新部署后 `site/.stats.json` 下载计数会清零（无持久磁盘）；需要保留计数可挂载磁盘并把 `SITE_DIR` 指向它，或升级付费档。
+
+## 其他云平台
+
+任何支持 Python 的平台（Railway / Fly.io / VPS）同理：
+
+```bash
+# 构建命令
+python3 build_all.py --web
+# 启动命令（平台注入 PORT 环境变量则自动跟随）
+python3 website/server.py
+```
+
 ## 本地运行
 
 ```bash
@@ -35,15 +61,20 @@ python3 website/server.py
 
 环境变量：
 
-- `PORT` — 监听端口（默认 8765）
-- `DIST_DIR` — 安装包目录（默认 `../dist-packages`，即 build_all.py 的输出位置）
+- `PORT` — 监听端口（默认 8765；Render 等平台会自动注入）
+- `DIST_DIR` — 安装包目录（默认自动探测：`website/dist-packages` → `../dist-packages`）
 
-## 服务器部署
+## 自有服务器部署（systemd / Nginx）
 
-上传 `website/` 目录与 `dist-packages/` 到服务器（保持两者同级或同级父目录）：
+上传仓库到服务器后：
 
 ```bash
-# systemd 常驻示例 /etc/systemd/system/browser-companion-site.service
+python3 build_all.py --web   # 生成 website/dist-packages/
+```
+
+systemd 常驻示例 `/etc/systemd/system/browser-companion-site.service`：
+
+```ini
 [Unit]
 Description=Browser Companion website
 After=network.target
@@ -74,9 +105,8 @@ server {
 
 ## 更新版本流程
 
-1. 改代码 → `python3 build_all.py`（重新生成两包）
-2. 重启 `server.py`（或无需重启——接口实时读 manifest 与文件）
-3. 页面版本号 / 体积 / 日期自动更新，无需改 HTML
+1. 改代码 → `python3 build_all.py`（本地）或直接 push（云平台自动重新构建）
+2. 页面版本号 / 体积 / 日期自动更新，无需改 HTML
 
 ## 安全要点
 

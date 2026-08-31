@@ -1,0 +1,16 @@
+# Render 部署配置 — https://render.com
+# 后端为纯 Python 标准库（server.py），无需安装任何依赖
+services:
+  - type: web
+    name: browser-companion-site
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: python3 build_all.py --web
+    startCommand: python3 website/server.py
+    envVars:
+      - key: PORT
+        value: 8765
+      - key: PYTHON_VERSION
+        value: 3.12.4
+    healthCheckPath: /api/version
