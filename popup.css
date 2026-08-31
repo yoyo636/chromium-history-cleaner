@@ -1,60 +1,52 @@
 /* -------------------------------------------------------------------------
  * popup.css — 液态玻璃（Liquid Glass）风格 + 顶部导航栏
- * 纯本地资源，不引入任何外部 CDN；亮 / 暗色自适应。
- * - 默认跟随系统（prefers-color-scheme）
- * - 也可通过 <html class="light|dark"> 强制指定（见「设置」模块）
- * 设计原则：稳定、可读、层次分明（求稳）。
+ * 纯本地资源，不引入任何外部 CDN。
+ * - 默认深色玻璃（面向程序员 / 办公场景），html.light 可切浅色
+ * - 整窗圆角矩形：宽度锚定在 <html> 上，任何子元素溢出都会被裁剪
+ *   （此前 body 固定 640px 而内容把 html 撑宽，右侧露出一截白色 —— 根因）
  * ------------------------------------------------------------------------- */
 
 :root {
-  --accent: #4c7bf3;
-  --accent-2: #7c5cff;
-  --danger: #e5484d;
-  --success: #2c9d6b;
-  --text: #1d2230;
-  --muted: #5b6472;
-  --glass: rgba(255, 255, 255, 0.55);
-  --glass-strong: rgba(255, 255, 255, 0.74);
-  --border: rgba(255, 255, 255, 0.6);
-  --shadow: 0 8px 30px rgba(31, 38, 80, 0.12);
+  /* 深色玻璃（默认） */
+  --accent: #5b8cff;
+  --accent-2: #8b6bff;
+  --danger: #ff5c69;
+  --success: #3fce8f;
+  --text: #e8ecf5;
+  --muted: #8b94a7;
+  --glass: rgba(24, 30, 48, 0.58);
+  --glass-strong: rgba(32, 40, 62, 0.78);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-hi: rgba(255, 255, 255, 0.22);
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --radius-sm: 10px;
   --radius: 14px;
   --radius-lg: 18px;
   --radius-xl: 22px;
+  --bg1: #10141f;
+  --bg2: #131a30;
+  --bg3: #0d1e26;
+  color-scheme: dark;
+}
+
+/* 手动指定暗色（与默认一致，显式声明保证语义清晰） */
+html.dark {
+  color-scheme: dark;
+}
+
+/* 浅色玻璃：仅当 <html class="light"> 时启用 */
+html.light {
+  --text: #232a3a;
+  --muted: #5d6678;
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.74);
+  --border: rgba(255, 255, 255, 0.6);
+  --border-hi: rgba(255, 255, 255, 0.9);
+  --shadow: 0 8px 30px rgba(31, 38, 80, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --bg1: #dbe7ff;
   --bg2: #efd9ff;
   --bg3: #d6fff0;
   color-scheme: light;
-}
-
-/* 手动指定暗色 */
-html.dark {
-  --text: #eef1f7;
-  --muted: #9aa3b2;
-  --glass: rgba(34, 38, 54, 0.5);
-  --glass-strong: rgba(40, 45, 64, 0.72);
-  --border: rgba(255, 255, 255, 0.12);
-  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-  --bg1: #161b32;
-  --bg2: #281d44;
-  --bg3: #0f2c36;
-  color-scheme: dark;
-}
-
-/* 跟随系统暗色（未手动指定时生效） */
-@media (prefers-color-scheme: dark) {
-  html:not(.light) {
-    --text: #eef1f7;
-    --muted: #9aa3b2;
-    --glass: rgba(34, 38, 54, 0.5);
-    --glass-strong: rgba(40, 45, 64, 0.72);
-    --border: rgba(255, 255, 255, 0.12);
-    --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-    --bg1: #161b32;
-    --bg2: #281d44;
-    --bg3: #0f2c36;
-    color-scheme: dark;
-  }
 }
 
 * {
@@ -66,16 +58,26 @@ body {
   padding: 0;
 }
 
-body {
-  /* 整体放大：388 → 640 宽，内容区更高，字号上调，避免换行/显示不全 */
+/* 整窗骨架：宽度与圆角锚定在 html 上。
+ * 子元素再宽也会被裁掉 —— 右侧白条的根因（html 被 640px 之外的元素撑宽）
+ * 从结构上根除。 */
+html {
   width: 640px;
-  min-height: 620px;
-  max-height: 640px;
+  height: 640px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--bg1), var(--bg2) 50%, var(--bg3));
+  box-shadow: inset 0 0 0 1px var(--border), inset 0 1px 0 var(--border-hi);
+}
+
+body {
+  width: 100%;
+  height: 640px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   color: var(--text);
-  background: linear-gradient(135deg, var(--bg1), var(--bg2) 50%, var(--bg3));
+  background: transparent;
   position: relative;
   overflow: hidden;
 }
@@ -90,37 +92,50 @@ body {
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(42px);
-  opacity: 0.5;
+  filter: blur(60px);
+  opacity: 0.42;
 }
 .orb-a {
-  width: 260px;
-  height: 260px;
-  background: #6f9bff;
-  top: -80px;
-  left: -60px;
+  width: 300px;
+  height: 300px;
+  background: #3d6bff;
+  top: -90px;
+  left: -70px;
 }
 .orb-b {
-  width: 240px;
-  height: 240px;
-  background: #b06bff;
-  bottom: -70px;
-  right: -50px;
+  width: 280px;
+  height: 280px;
+  background: #8a4bff;
+  bottom: -90px;
+  right: -60px;
 }
 .orb-c {
-  width: 190px;
-  height: 190px;
-  background: #4be0c0;
-  top: 42%;
-  left: 55%;
+  width: 220px;
+  height: 220px;
+  background: #19c8a8;
+  top: 44%;
+  left: 58%;
   transform: translateX(-50%);
+  opacity: 0.3;
+}
+/* 深色氛围下再加一层顶部冷光，让玻璃有「被照亮」的感觉 */
+.bg-orbs::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 160px;
+  background: radial-gradient(ellipse at top, rgba(120, 150, 255, 0.16), transparent 70%);
+  pointer-events: none;
 }
 
 .glass {
   background: var(--glass);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
   border: 1px solid var(--border);
+  border-top-color: var(--border-hi);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
@@ -163,7 +178,7 @@ body {
 }
 .nav {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   margin-left: auto;
   /* 单行横向滚动，不再换行堆叠 */
   flex-wrap: nowrap;
@@ -179,8 +194,8 @@ body {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
-  padding: 7px 13px;
+  font-size: 12px;
+  padding: 6px 10px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
@@ -195,6 +210,7 @@ body {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
   border-color: transparent;
+  box-shadow: 0 2px 12px rgba(91, 140, 255, 0.35);
 }
 
 /* ---------- 「更多」面板 ---------- */
@@ -1055,4 +1071,14 @@ input[type="checkbox"] {
   top: 0;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* ==================== 房地产开发工具（密码解锁） ==================== */
+.re-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+.re-grid .input {
+  width: 100%;
 }
