@@ -75,6 +75,10 @@
       const toolbar = HC.el('div', { class: 'toolbar' });
       const total = HC.el('div', { class: 'total' });
       const list = HC.el('div', { class: 'list' });
+      const diagBox = HC.el('div', {
+        class: 'row glass',
+        style: 'display:none;flex-direction:column;align-items:flex-start;gap:4px;',
+      });
 
       root.appendChild(
         HC.el('div', { class: 'row glass' }, [presetWrap, startI, HC.el('span', { class: 'dash', text: '→' }), endI, searchBtn])
@@ -82,6 +86,7 @@
       root.appendChild(HC.el('div', { class: 'row glass' }, [filter]));
       root.appendChild(toolbar);
       root.appendChild(total);
+      root.appendChild(diagBox);
       root.appendChild(list);
       container.appendChild(root);
 
@@ -188,6 +193,7 @@
         toolbar.appendChild(HC.el('button', { class: 'btn btn-danger', text: '删除全部', onclick: delAll }));
         toolbar.appendChild(HC.el('button', { class: 'btn', text: '导出JSON', onclick: () => exportData('json') }));
         toolbar.appendChild(HC.el('button', { class: 'btn', text: '导出CSV', onclick: () => exportData('csv') }));
+        toolbar.appendChild(HC.el('button', { class: 'btn', text: '自检', onclick: runDiag }));
 
         if (!filtered.length) {
           list.appendChild(HC.el('div', { class: 'empty', text: '没有记录' }));
@@ -321,6 +327,66 @@
             })
             .catch((e) => HC.toast('删除失败：' + e.message, 'error'));
         });
+      }
+
+      /* ------------------- 自检：实测浏览器的单次返回上限 -------------------
+       * CAP 是按 Chromium 实测硬编码的，换浏览器未必一样。与其让用户「感觉删不干净」，
+       * 不如把「请求 N 条实际返回多少」直接测出来摆给他看。 */
+      function runDiag() {
+        HC.toast('正在自检…', 'info');
+        HC.callBackground('HISTORY_DIAG')
+          .then(showDiag)
+          .catch((e) => HC.toast('自检失败：' + e.message, 'error'));
+      }
+
+      function showDiag(d) {
+        diagBox.innerHTML = '';
+        const line = (txt, color) =>
+          diagBox.appendChild(
+            HC.el('div', {
+              class: 'note-text',
+              style: 'font-size:12.5px;' + (color ? 'color:' + color + ';' : ''),
+              text: txt,
+            })
+          );
+
+        diagBox.appendChild(HC.el('div', { class: 'section-title', text: '🔍 清理能力自检' }));
+        line('浏览器：' + HC.detectBrowser() + (HC.isFirefox ? '（Firefox 分支）' : '（Chromium 分支）'));
+        line(`单次探测：请求 ${d.probeRequested} 条 → 全窗返回 ${d.fullWindow == null ? '—' : d.fullWindow} 条，两半窗合计 ${d.halfSum == null ? '—' : d.halfSum} 条`);
+        line(`推断：${d.capInferred || '—'}`);
+        line(`代码中的 CAP 常量：${d.cap}` + (d.capAdjusted ? ` → 自检后已自适应下调为 ${d.capAdjusted}` : ''));
+        line(`全量查询总数：${d.totalCount == null ? '失败' : d.totalCount + ' 条'}`);
+
+        const miss = Object.keys(d.apiOk || {}).filter((k) => !d.apiOk[k]);
+        line(
+          'API 可用性：' + (miss.length ? '缺少 ' + miss.join('、') : 'history / deleteUrl / deleteRange / browsingData 全部可用'),
+          miss.length ? 'var(--danger)' : 'var(--success)'
+        );
+
+        // 结论判定
+        let verdict = '';
+        let color = 'var(--success)';
+        if (d.error) {
+          verdict = '⚠️ 探测失败：' + d.error + '（多半是没拿到「浏览历史」权限）';
+          color = 'var(--danger)';
+        } else if (miss.length) {
+          verdict = '⚠️ 有 API 不可用：' + miss.join('、') + '。请在扩展详情页确认「读取/修改浏览历史」权限已开启。';
+          color = 'var(--danger)';
+        } else if (d.totalCount == null) {
+          verdict = '⚠️ 全量查询失败：' + (d.scanError || '未知错误');
+          color = 'var(--danger)';
+        } else if (d.totalCount > (d.fullWindow || 0)) {
+          verdict = `✅ 二分已生效：单次只能取 ${d.fullWindow} 条，全量已补全到 ${d.totalCount} 条 —— 清理会一次到位。`;
+        } else if (d.halfSum > d.fullWindow) {
+          verdict = `✅ 确认浏览器存在单次上限（${d.fullWindow} 条），二分补全机制在工作。`;
+        } else {
+          verdict = `✅ 历史共 ${d.totalCount} 条，未触到浏览器单次上限，单窗即取全。`;
+        }
+        line(verdict, color);
+        if (d.scanError) line('全量查询错误：' + d.scanError, 'var(--danger)');
+
+        diagBox.style.display = 'flex';
+        HC.toast('自检完成', 'success');
       }
 
       function exportData(kind) {
