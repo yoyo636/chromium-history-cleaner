@@ -17,9 +17,9 @@
       // 主题
       const themeSel = HC.el('select', { class: 'input opt-ctrl' });
       [
+        ['dark', '深色玻璃（推荐）'],
+        ['light', '浅色玻璃'],
         ['system', '跟随系统'],
-        ['light', '亮色'],
-        ['dark', '暗色'],
       ].forEach(([v, l]) => themeSel.appendChild(HC.el('option', { value: v, text: l })));
 
       // 历史默认范围
@@ -58,6 +58,32 @@
         });
       }
 
+      /* 房地产开发：密码解锁的隐藏工具集（房贷 / 税费 / 租金回报），再次输入同密码关闭 */
+      const reBtn = HC.el('button', { class: 'mini', text: '…', onclick: toggleReEstate });
+      function refreshReBtn(on) {
+        reBtn.textContent = on ? '关闭房地产开发' : '开启房地产开发';
+        reBtn.style.background = on ? 'rgba(63, 206, 143, 0.12)' : '';
+        reBtn.style.color = on ? 'var(--success)' : '';
+      }
+      async function toggleReEstate() {
+        const cur = await new Promise((res) =>
+          chrome.storage.local.get({ reEstateUnlocked: false }, (r) => res(!!r.reEstateUnlocked)));
+        const pass = await HC.prompt({
+          title: cur ? '关闭房地产开发' : '开启房地产开发',
+          body: cur ? '再次输入相同密码即可关闭' : '输入访问密码以启用房地产开发工具（入口出现在「更多」面板）',
+          placeholder: '密码',
+        });
+        if (pass == null || !pass) return;
+        chrome.runtime.sendMessage({ type: 'RE_SET_UNLOCK', payload: { on: !cur, pass } }, (resp) => {
+          if (chrome.runtime.lastError) return HC.toast(chrome.runtime.lastError.message, 'error');
+          if (resp && resp.ok) {
+            HC.toast(cur ? '房地产开发已关闭' : '已解锁：入口在「更多 → 房地产开发」', 'success');
+            refreshReBtn(!cur);
+            if (window.__refreshMorePanel) window.__refreshMorePanel();
+          } else HC.toast((resp && resp.error) || '密码错误', 'error');
+        });
+      }
+
       const saveBtn = HC.el('button', { class: 'btn btn-primary', text: '保存设置', onclick: save });
 
       root.appendChild(
@@ -89,6 +115,13 @@
               HC.el('div', { class: 'opt-desc', text: '启用「更多 → 开发者·篡改」模块，可修改历史 / 书签 / 下载 / Cookie' }),
             ]),
             devBtn,
+          ]),
+          HC.el('div', { class: 'opt-row' }, [
+            HC.el('div', { class: 'opt-info' }, [
+              HC.el('div', { class: 'opt-name', text: '房地产开发' }),
+              HC.el('div', { class: 'opt-desc', text: '启用「更多 → 房地产开发」工具集：房贷计算 / 交易税费 / 租金回报。输入密码开启，再次输入同密码关闭。' }),
+            ]),
+            reBtn,
           ]),
         ])
       );
@@ -177,7 +210,10 @@
         rangeSel.value = prefs.defRange;
         confirmChk.checked = !!prefs.cleanupConfirm;
       });
-      chrome.storage.local.get({ devMode: false }, (r) => refreshDevBtn(!!r.devMode));
+      chrome.storage.local.get({ devMode: false, reEstateUnlocked: false }, (r) => {
+        refreshDevBtn(!!r.devMode);
+        refreshReBtn(!!r.reEstateUnlocked);
+      });
     },
   };
 })();
