@@ -14,7 +14,7 @@
 /* CAP 必须等于「浏览器单次实际能返回的最大条数」，否则触顶判定永远为假、
  * 二分永不触发 —— 表现就是「查询被静默截断到 CAP 条，历史永远删不完」。
  * chrome.history.search 的 maxResults 默认 100，实测单次上限也是 100。 */
-const CAP = 100;
+let CAP = 100; // 可被自检下调：若实测浏览器上限低于 100，运行时自适应修正
 /* 二分深度：时间轴是 [1970, now] 约 56 年，而历史往往集中在最近几个月。
  * 光把「有数据的那一段」从 56 年里切出来就要十几层，再切到每窗 <100 条又要几层。
  * 12 层在真实数据上不够，会静默丢数据，故放到 28（触顶路径才会递归，空窗口一层就返回）。 */
@@ -75,6 +75,73 @@ function dedupe(items) {
     if (!m.has(k)) m.set(k, i);
   }
   return [...m.values()];
+}
+
+/* ------------------------- 自检（跨浏览器诊断） -------------------------
+ * CAP 是按 Chromium 实测硬编码的，但不同内核/版本的上限未必一样。
+ * 这个自检把「浏览器单次到底返回多少条」实测出来，让用户可以自己证实
+ * 查询有没有被截断，而不是靠「感觉删不干净」。 */
+async function historyDiagnostics() {
+  const PROBE = 1000;
+  const out = {
+    cap: CAP,
+    probeRequested: PROBE,
+    probeReturned: null,
+    capInferred: null,
+    totalCount: null,
+    apiOk: {},
+    error: null,
+    scanError: null,
+  };
+  out.apiOk = {
+    history: !!chrome.history,
+    search: !!(chrome.history && chrome.history.search),
+    deleteUrl: !!(chrome.history && chrome.history.deleteUrl),
+    deleteRange: !!(chrome.history && chrome.history.deleteRange),
+    deleteAll: !!(chrome.history && chrome.history.deleteAll),
+    browsingData: !!(chrome.browsingData && chrome.browsingData.remove),
+  };
+  try {
+    const now = Date.now();
+    const probe = await historySearch(0, now, PROBE);
+    out.probeReturned = probe.length;
+    out.fullWindow = probe.length;
+    /* 单窗口查询无法区分「返回 R 条」是浏览器上限还是真实总量 ——
+     * maxResults 是我们自己传的，返回数永远 ≤ maxResults。
+     * 可靠判据：以 probe 里最早一条的时间为分割点切两半。
+     * probe 是最新的一批，若更早的半窗还有数据，halfSum 必然 > fullWindow → 存在截断。 */
+    if (probe.length === 0) {
+      out.halfSum = 0;
+      out.capInferred = '无历史数据';
+    } else {
+      const splitAt = probe[probe.length - 1].lastVisitTime || 0;
+      const left = splitAt > 0 ? await historySearch(0, splitAt - 1, PROBE) : [];
+      const right = await historySearch(splitAt, now, PROBE);
+      out.halfSum = left.length + right.length;
+      if (probe.length >= PROBE) {
+        out.capInferred = '≥' + PROBE + '（单次能返回 ' + PROBE + ' 条以上）';
+      } else if (out.halfSum > probe.length) {
+        out.capInferred = '全窗单次只返回 ' + probe.length + ' 条，但以 probe 最早一条为界，'
+          + '两窗合计 ' + out.halfSum + ' 条 → 确认被浏览器上限截断，二分机制在工作';
+        /* 自适应：实测上限可能低于代码 CAP，下调以保证触顶判定可靠 */
+        if (probe.length < CAP) {
+          CAP = Math.max(10, probe.length);
+          out.capAdjusted = CAP;
+        }
+      } else {
+        out.capInferred = '全窗 ' + probe.length + ' 条 = 两窗之和，未触到浏览器上限';
+      }
+    }
+  } catch (e) {
+    out.error = e.message;
+  }
+  try {
+    const all = await searchAll(0, Date.now());
+    out.totalCount = all.length;
+  } catch (e) {
+    out.scanError = e.message;
+  }
+  return out;
 }
 
 /* ------------------------- 统计（聚合式） ------------------------- */
@@ -171,6 +238,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case 'SEARCH_STATS':
       collectStats(payload.startTime || 0, payload.endTime || Date.now())
         .then((s) => reply(true, s))
+        .catch((e) => reply(false, null, e.message));
+      return true;
+
+    case 'HISTORY_DIAG':
+      historyDiagnostics()
+        .then((d) => reply(true, d))
         .catch((e) => reply(false, null, e.message));
       return true;
 
