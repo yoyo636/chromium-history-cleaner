@@ -13,7 +13,9 @@
 
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import zipfile
 
@@ -26,6 +28,9 @@ EXCLUDE = {
     'upload.py', 'upload_cws.py', 'sync_github.py',
     'generate_icons.py', 'listing-preview.html',
     'website',
+    # win-installer/ 是 Windows 安装包的构建目录（内含 extension/ 完整副本），
+    # 绝不能打进扩展 zip，否则会嵌套一份自己、体积翻倍。
+    'win-installer',
 }
 
 # Firefox 版不含 BrowserPilot：gecko manifest 未注册 content-bridge，
@@ -35,6 +40,96 @@ FIREFOX_EXCLUDE = {
     'bp-confirm.html', 'bp-confirm.js',
     os.path.join('modules', 'browserpilot.js'),
 }
+
+# ----------------------- Windows 安装包（NSIS）-----------------------
+WIN_NSIS = os.path.join(ROOT, 'win-installer', 'BrowserCompanion-Setup.nsi')
+WIN_EXT = os.path.join(ROOT, 'win-installer', 'extension')
+# 同步到 win-installer/extension 时额外排除（避免把仓库子目录/工具脚本带进安装包，
+# 尤其不能把源里的 win-installer/ 自己再嵌套进去）
+WIN_EXTRA_EXCLUDE = {'win-installer', 'render.yaml', 'build_chromium.py'}
+
+
+def sync_windows_extension():
+    """把当前扩展源码（排除构建产物）原样同步进 win-installer/extension/。"""
+    if os.path.isdir(WIN_EXT):
+        shutil.rmtree(WIN_EXT)
+    os.makedirs(WIN_EXT)
+    for f in collect():
+        rel = os.path.relpath(f, ROOT)
+        top = rel.split(os.sep)[0]
+        if top in WIN_EXTRA_EXCLUDE or os.path.basename(f) in WIN_EXTRA_EXCLUDE:
+            continue
+        dst = os.path.join(WIN_EXT, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(f, dst)
+    # manifest.firefox.json 也是扩展一部分，装包时一并带上（不影响 Chrome 加载）
+    ff = os.path.join(ROOT, 'manifest.firefox.json')
+    if os.path.exists(ff):
+        shutil.copy2(ff, os.path.join(WIN_EXT, 'manifest.firefox.json'))
+
+
+def stamp_nsis_version(ver):
+    """让 NSIS 脚本里的 VERSION / VIProductVersion 跟随 manifest 版本。"""
+    if not os.path.exists(WIN_NSIS):
+        return
+    s = open(WIN_NSIS, encoding='utf-8').read()
+    s2 = re.sub(r'(!define VERSION\s+)"[\d.]+"', r'\1"%s"' % ver, s)
+    s2 = re.sub(r'(VIProductVersion\s+)"[\d.]+"', r'\1"%s.0"' % ver, s2)
+    if s2 != s:
+        open(WIN_NSIS, 'w', encoding='utf-8').write(s2)
+
+
+def build_windows():
+    """同步扩展 + 对齐版本 + 调用 makensis 生成安装包（best-effort）。"""
+    try:
+        ver = json.load(open(os.path.join(ROOT, 'manifest.json'), encoding='utf-8'))['version']
+    except Exception:
+        ver = None
+    if ver:
+        stamp_nsis_version(ver)
+    sync_windows_extension()
+    # nsi 的 OutFile 是 ..\dist-packages\...（相对 nsi 所在目录），即 ROOT/dist-packages。
+    # 先建好该暂存目录，构建完再把 exe 挪到与 zip 相同的 OUT_DIR，保持产物集中。
+    nsi_dir = os.path.dirname(WIN_NSIS)
+    local_dist = os.path.join(ROOT, 'dist-packages')
+    os.makedirs(local_dist, exist_ok=True)
+    try:
+        subprocess.run(['makensis', WIN_NSIS], cwd=nsi_dir,
+                       capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        print('⚠ 未找到 makensis，跳过 Windows 安装包'
+              '（可手动 cd win-installer && makensis BrowserCompanion-Setup.nsi）')
+        _cleanup_local_dist(local_dist)
+        return
+    except subprocess.CalledProcessError as e:
+        print('✗ Windows 安装包构建失败：')
+        print((e.stderr or e.stdout)[-800:])
+        sys.exit(1)
+    moved = []
+    for f in sorted(os.listdir(local_dist)):
+        if f.lower().endswith('.exe'):
+            src = os.path.join(local_dist, f)
+            dst = os.path.join(OUT_DIR, f)
+            if os.path.abspath(src) != os.path.abspath(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.move(src, dst)
+            moved.append(dst)
+    _cleanup_local_dist(local_dist)
+    if moved:
+        for m in moved:
+            print('✓ Windows 安装包: ' + m)
+    else:
+        print('⚠ makensis 执行成功，但未找到 exe 产物')
+
+
+def _cleanup_local_dist(local_dist):
+    """构建用的暂存目录用完即删，避免留在仓库里。"""
+    try:
+        if os.path.isdir(local_dist) and not os.listdir(local_dist):
+            os.rmdir(local_dist)
+    except OSError:
+        pass
+
 
 
 def collect(extra_exclude=None):
@@ -90,6 +185,7 @@ def main():
     print(f'✓ Firefox 包:  {z2}')
     print(f'    version={mf2["version"]} 文件数={n2}  background={mf2["background"].get("scripts","n/a")}')
     print('产物目录:', OUT_DIR)
+    build_windows()
 
 
 if __name__ == '__main__':

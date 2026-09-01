@@ -6,6 +6,9 @@ dist-chromium/
 .tmp/
 node_modules/
 
+# Windows 安装包的扩展快照（由 build_all.py 从源码同步生成，不进仓库）
+win-installer/extension/
+
 # 打包输出（本地在仓库上级 dist-packages/；--web 模式在 website/dist-packages/，均不进仓库）
 *.zip
 website/dist-packages/
