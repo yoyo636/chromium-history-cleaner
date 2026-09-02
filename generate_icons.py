@@ -13,7 +13,10 @@ import os
 import struct
 import zlib
 
-BG = (26, 115, 232)  # #1a73e8
+BG_TOP = (26, 115, 232)  # #1a73e8  渐变顶
+BG_BOT = (20, 90, 195)   # 渐变底（略深，给图标一点纵深）
+SQ_N = 4.5               # 超椭圆指数 4–5 = iOS 风格连续曲率（区别于普通圆角矩形）
+SQ_INSET = 1.5           # squircle 离画布边的内缩（px），避免边缘抗锯齿贴边
 
 
 def write_png(path, size, pixel_fn):
@@ -44,23 +47,30 @@ def write_png(path, size, pixel_fn):
 
 def make_pixel_fn(size):
     cx = cy = size / 2.0
-    radius = size * 0.24  # 圆角半径
-    ring_r = size * 0.30  # 历史环半径
-    ring_t = max(1.0, size * 0.07)  # 环厚度
-    hand_t = max(1.0, size * 0.05)  # 指针厚度
+    # squircle 的「半轴」：画布半宽减一个内缩
+    half = (size - 1) / 2.0 - SQ_INSET
+    # 标记加粗：工具栏 16px 下也认得出是「时钟」而不是蓝圆点
+    ring_r = size * 0.33
+    ring_t = max(1.4, size * 0.10)
+    hand_t = max(1.2, size * 0.065)
 
-    def rounded_bg(x, y):
+    def squircle_inside(x, y):
+        """超椭圆 |u|^n + |v|^n <= 1 判定（n=4–5 即 iOS 圆角矩形）。"""
         if x < 0 or y < 0 or x >= size or y >= size:
-            return (0, 0, 0, 0)
-        nx = min(x, size - 1 - x)
-        ny = min(y, size - 1 - y)
-        if nx >= radius or ny >= radius:
-            return (BG[0], BG[1], BG[2], 255)
-        dx = radius - nx
-        dy = radius - ny
-        if dx * dx + dy * dy <= radius * radius:
-            return (BG[0], BG[1], BG[2], 255)
-        return (0, 0, 0, 0)
+            return False
+        u = (x + 0.5 - cx) / half
+        v = (y + 0.5 - cy) / half
+        if u < -1 or u > 1 or v < -1 or v > 1:
+            return False
+        return (abs(u) ** SQ_N) + (abs(v) ** SQ_N) <= 1.0
+
+    def bg_color(y):
+        """纵向渐变：上亮下暗，给图标一点立体感。"""
+        t = (y + 0.5) / size
+        r = BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t
+        g = BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t
+        b = BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t
+        return (int(r), int(g), int(b), 255)
 
     def on_segment(px, py, x0, y0, x1, y1, th):
         dx_ = x1 - x0
@@ -74,18 +84,18 @@ def make_pixel_fn(size):
         return math.hypot(px - qx, py - qy) <= th
 
     def pixel(x, y):
-        r, g, b, a = rounded_bg(x, y)
-        if a == 0:
-            return (r, g, b, a)
+        if not squircle_inside(x, y):
+            return (0, 0, 0, 0)
+        r, g, b, a = bg_color(y)
         px = x + 0.5
         py = y + 0.5
         d = math.hypot(px - cx, py - cy)
-        # 历史环
+        # 白色历史环
         if abs(d - ring_r) <= ring_t:
             return (255, 255, 255, 255)
-        # 两根指针（时钟造型）
-        if on_segment(px, py, cx, cy, cx + ring_r * 0.55, cy, hand_t) or on_segment(
-            px, py, cx, cy, cx, cy - ring_r * 0.55, hand_t
+        # 时针（指 12）+ 分针（指 3）= L 形，3 点整读数
+        if on_segment(px, py, cx, cy, cx, cy - ring_r * 0.55, hand_t) or on_segment(
+            px, py, cx, cy, cx + ring_r * 0.55, cy, hand_t
         ):
             return (255, 255, 255, 255)
         return (r, g, b, a)
