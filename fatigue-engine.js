@@ -360,19 +360,27 @@
   class VideoWatcher {
     constructor() { this.playingMs = 0; this._last = 0; this._seen = new WeakSet(); }
     observe() {
+      // 没有 video 的页面占绝大多数，固定 8s 空转查询是长期浪费。
+      // 改为：有 video 时维持 8s 精度；一直没 video 就指数退避到 60s。
+      let delay = 8000;
       const scan = () => {
-        document.querySelectorAll('video').forEach((v) => {
-          if (this._seen.has(v)) return;
-          this._seen.add(v);
-          v.addEventListener('timeupdate', () => {
-            const now = performance.now();
-            if (!v.paused && this._last) this.playingMs += now - this._last;
-            this._last = v.paused ? 0 : now;
-          }, { passive: true });
-        });
+        // 隐藏标签页不扫：后台页无需统计视频时长，也省掉定时唤醒
+        if (!document.hidden) {
+          const vids = document.querySelectorAll('video');
+          vids.forEach((v) => {
+            if (this._seen.has(v)) return;
+            this._seen.add(v);
+            v.addEventListener('timeupdate', () => {
+              const now = performance.now();
+              if (!v.paused && this._last) this.playingMs += now - this._last;
+              this._last = v.paused ? 0 : now;
+            }, { passive: true });
+          });
+          delay = vids.length ? 8000 : Math.min(delay * 2, 60000);
+        }
+        setTimeout(scan, delay);
       };
       scan();
-      setInterval(scan, 8000);
     }
     minutesPerWindow(winMs) { return clamp01(this.playingMs / winMs); }
   }
@@ -1096,5 +1104,11 @@
     Engine.saveProfile(true);
   });
   // 定期学习 + 写盘
-  setInterval(() => { Engine.learn(); Engine.saveProfile(false); }, 60000);
+  // 隐藏标签页跳过：后台页继续学习/写盘只是白耗 CPU，
+  // 还会和其他标签页抢写同一份 fatigueProfile（互相覆盖，且写的是过期快照）。
+  setInterval(() => {
+    if (document.hidden) return;
+    Engine.learn();
+    Engine.saveProfile(false);
+  }, 60000);
 })();

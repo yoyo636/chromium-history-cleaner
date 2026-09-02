@@ -214,10 +214,13 @@
 
   if (ENGINE && ENGINE.ready) {
     // 每 5s：活跃时间心跳（引擎 M1 任务曲线 / M3 恢复模型 / 活跃占比）
-    setInterval(() => ENGINE.heartbeat(), 5000);
+    // 隐藏标签页跳过：用户没在看，统计活跃时长没有意义，纯属定时唤醒耗电
+    setInterval(() => { if (!document.hidden) ENGINE.heartbeat(); }, 5000);
 
     // 每 60s：引擎评分 → 渲染目标 + 上报 + 微休息教练
     setInterval(() => {
+      // 隐藏标签页跳过：不评分、不上报、也不弹休息提示（弹了用户也看不见）
+      if (document.hidden) return;
       let r;
       try { r = ENGINE.tick(); } catch (_e) { return; }
       targetLevel = r.level; // 供渐进使用

@@ -32,6 +32,8 @@
 
   const MAX_HIDE = 500;        // 单页最大隐藏数，防失控
   const MAX_MUTATIONS = 2000;  // 单页最大观察次数，防卡顿
+  const SWEEP_DEBOUNCE_MS = 200; // 变动洪流合并：一批变动只跑一次全量查询
+  const IDLE_STOP_SWEEPS = 6;    // 连续 N 次无新增隐藏 → 广告已加载完，彻底停止观察
 
   let enabled = true;
   let allowSet = new Set();
@@ -40,7 +42,9 @@
   let hidden = new WeakSet();
   let mutations = 0;
   let reportTimer = null;
-  let alreadyRan = false;
+  let sweepTimer = null;
+  let idleSweeps = 0;
+  let observer = null;
 
   function curDomain() {
     try { return new URL(location.href).hostname.replace(/^www\./, ''); }
@@ -99,26 +103,63 @@
     }, 800);
   }
 
+  /** 只关心元素节点新增；文本/注释节点的变动不触发 sweep */
+  function hasElementAdded(records) {
+    for (const rec of records) {
+      const n = rec.addedNodes;
+      if (!n || !n.length) continue;
+      for (let i = 0; i < n.length; i++) {
+        if (n[i].nodeType === 1) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 合并变动洪流后再 sweep。
+   * SELECTORS 有 43 条且含 [class*=]/[aria-label*=] 子串匹配（走不了选择器快速路径），
+   * 全量 querySelectorAll 并不便宜；SPA / 无限滚动下 DOM 变动是持续的，
+   * 不节流会退化成「每批 DOM 变动扫一遍全文档」。
+   */
+  function scheduleSweep() {
+    if (sweepTimer) return;
+    sweepTimer = setTimeout(() => {
+      sweepTimer = null;
+      const before = hiddenCount;
+      sweep();
+      if (hiddenCount > before) {
+        idleSweeps = 0;
+        report();
+      } else if (++idleSweeps >= IDLE_STOP_SWEEPS && observer) {
+        // 连续多次都没新广告 → 广告已加载完，摘掉观察者，别一直挂到页面关闭
+        observer.disconnect();
+        observer = null;
+      }
+    }, SWEEP_DEBOUNCE_MS);
+  }
+
+  function teardown() {
+    if (observer) { observer.disconnect(); observer = null; }
+    if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
+    idleSweeps = 0;
+    mutations = 0;
+  }
+
   function start() {
-    if (alreadyRan) return;
-    alreadyRan = true;
-    if (!enabled || isAllowed()) return;
+    // 关闭开关或白名单站点：彻底停掉观察与待跑任务
+    // （顺带修复「关闭后再开启不生效」——原来被 alreadyRan 一次性闸门挡住）
+    if (!enabled || isAllowed()) { teardown(); return; }
+    if (observer) return; // 已在运行，避免重复挂观察者
 
     sweep();
     report();
 
-    // 兜底懒加载：监听新增节点（含 iframe 由各自世界处理，这里仅主文档）
-    const observer = new MutationObserver((records) => {
-      if (mutations >= MAX_MUTATIONS) { observer.disconnect(); return; }
+    // 兜底懒加载：监听新增节点（iframe 由各自世界处理，这里仅主文档）
+    observer = new MutationObserver((records) => {
+      if (!observer) return;
+      if (mutations >= MAX_MUTATIONS) { observer.disconnect(); observer = null; return; }
       mutations += records.length;
-      let dirty = false;
-      for (const rec of records) {
-        if (rec.addedNodes && rec.addedNodes.length) { dirty = true; break; }
-      }
-      if (dirty) {
-        sweep();
-        report();
-      }
+      if (hasElementAdded(records)) scheduleSweep();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
