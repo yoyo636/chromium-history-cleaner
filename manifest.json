@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "浏览器搭子 · 历史与标签页管家",
-  "version": "4.11.3",
-  "description": "实用的跨浏览器搭子：历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档、数据统计、视觉疲劳自适应护眼、标签页性能透视、音频静音管理与无痕追踪防护。内置 BrowserPilot：让网页端 AI（Kimi / DeepSeek / MiniMax）通过结构化指令安全控制浏览器。兼容 Chromium 内核与 Firefox，液态玻璃界面。",
+  "version": "4.12.0",
+  "description": "实用的跨浏览器搭子：历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档、数据统计、视觉疲劳自适应护眼、标签页性能透视、音频静音管理与无痕追踪防护。兼容 Chromium 内核与 Firefox，液态玻璃界面。",
   "permissions": [
     "history",
     "storage",
@@ -12,9 +12,7 @@
     "browsingData",
     "sessions",
     "tabCapture",
-    "scripting",
     "notifications",
-    "activeTab",
     "cookies",
     "alarms",
     "declarativeNetRequest"
@@ -52,18 +50,6 @@
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
-    },
-    {
-      "matches": [
-        "https://kimi.moonshot.cn/*",
-        "https://chat.deepseek.com/*",
-        "https://chat.minimaxi.com/*"
-      ],
-      "js": [
-        "content-bridge.js"
-      ],
-      "run_at": "document_idle",
-      "all_frames": false
     }
   ],
   "declarative_net_request": {
@@ -88,18 +74,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "browserpilot-protocol.md"
-      ],
-      "matches": [
-        "https://kimi.moonshot.cn/*",
-        "https://chat.deepseek.com/*",
-        "https://chat.minimaxi.com/*"
-      ]
-    }
-  ],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

@@ -932,34 +932,12 @@ input[type="checkbox"] {
   background: rgba(40, 140, 90, 0.95);
 }
 
-/* ---------- BrowserPilot 模块 ---------- */
-.bp-module { display: flex; flex-direction: column; gap: 10px; }
-.bp-desc {
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--muted);
-  margin: 0;
-}
-.bp-actions { display: flex; flex-direction: column; gap: 8px; }
-.bp-status {
-  font-size: 12px;
-  color: var(--text);
-  background: var(--card, rgba(255, 255, 255, 0.06));
-  border-radius: 8px;
-  padding: 8px 10px;
-}
+/* 通用小标题 —— health / focus 等算法模块仍在复用，勿删 */
 .section-subtitle {
   font-size: 12.5px;
   color: var(--muted);
   font-weight: 600;
   margin-top: 4px;
-}
-.bp-list {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: var(--text);
 }
 
 /* ==================== 开发者模式 · 篡改（tamper） ==================== */

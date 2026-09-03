@@ -12,7 +12,7 @@ ManifestDPIAware true
 
 !define APPNAME      "BrowserCompanion"
 !define APPCN        "浏览器搭子"
-!define VERSION      "4.11.3"
+!define VERSION      "4.12.0"
 !define PUBLISHER    "BrowserCompanion"
 !define HELPFILE     "BrowserCompanion 安装指南.html"
 !define LAUNCHER     "reload-extension.bat"
@@ -23,7 +23,7 @@ InstallDir "$LOCALAPPDATA\${APPNAME}"
 InstallDirRegKey HKCU "Software\${APPNAME}" "InstallDir"
 RequestExecutionLevel user
 
-VIProductVersion "4.11.3.0"
+VIProductVersion "4.12.0.0"
 VIAddVersionKey /LANG=2052 "ProductName" "${APPNAME}"
 VIAddVersionKey /LANG=2052 "FileDescription" "${APPCN} 安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"

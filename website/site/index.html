@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>浏览器搭子 · Browser Companion</title>
-<meta name="description" content="浏览器搭子：历史清理、标签管理、护眼、性能与 AI 操控，一套代码兼容 Chrome / Edge / Firefox。">
+<meta name="description" content="浏览器搭子：历史清理、标签管理、护眼、性能与隐私加固，一套代码兼容 Chrome / Edge / Firefox。">
 <style>
   :root {
     --bg: #06070d;
@@ -198,31 +198,6 @@
   .feat h3 { font-size: 17px; margin-bottom: 8px; }
   .feat p { font-size: 13.5px; color: var(--ink-dim); }
 
-  /* ---------- AI 操控展示 ---------- */
-  .bp-wrap {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
-  }
-  .bp-panel { padding: 30px; }
-  .bp-panel h3 { font-size: 18px; margin-bottom: 14px; }
-  .bp-panel p { font-size: 14px; color: var(--ink-dim); margin-bottom: 16px; }
-  .bp-panel ul { list-style: none; }
-  .bp-panel li {
-    font-size: 13.5px; color: var(--ink-dim); padding: 7px 0 7px 26px; position: relative;
-  }
-  .bp-panel li::before {
-    content: "✓"; position: absolute; left: 0; color: var(--accent3); font-weight: 700;
-  }
-  .chat-demo { padding: 26px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
-  .chat-line { margin-bottom: 14px; opacity: 0; transform: translateY(8px); animation: chatin .5s forwards; }
-  .chat-line .who { color: var(--accent2); font-weight: 600; }
-  .chat-line.user .who { color: var(--accent3); }
-  .chat-line.tool .who { color: var(--accent); }
-  .chat-line .msg { color: var(--ink-dim); white-space: pre-wrap; word-break: break-all; }
-  @keyframes chatin { to { opacity: 1; transform: none; } }
-  .cursor-blink { display: inline-block; width: 7px; height: 14px; background: var(--accent3);
-    vertical-align: -2px; animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-
   /* ---------- 隐私条 ---------- */
   .privacy-strip {
     display: flex; align-items: center; justify-content: center; gap: 14px;
@@ -249,7 +224,6 @@
   .reveal.in { opacity: 1; transform: none; }
 
   @media (max-width: 880px) {
-    .bp-wrap { grid-template-columns: 1fr; }
     nav .nav-links { display: none; }
     .dl-card { width: 100%; max-width: 340px; }
   }
@@ -269,7 +243,6 @@
   <span class="brand"><span class="dot"></span>浏览器搭子</span>
   <span class="nav-links">
     <a href="#features">功能</a>
-    <a href="#browserpilot">AI 操控</a>
     <a href="#privacy">隐私</a>
     <a href="#download">下载</a>
   </span>
@@ -282,7 +255,7 @@
   <header class="hero">
     <div class="badge">✦ v4.10 · 开源 · 全平台 · 本地处理</div>
     <h1>给浏览器的<br><span class="grad">十二位搭子</span></h1>
-    <p class="sub">历史清理、标签管理、护眼引擎、性能透视、隐私加固，以及让网页端 AI 安全操控浏览器的 BrowserPilot——一个弹窗，全部搞定。</p>
+    <p class="sub">历史清理、标签管理、护眼引擎、性能透视、隐私加固——一个弹窗，全部搞定。</p>
 
     <div class="dl-row" id="download">
       <div class="glass dl-card">
@@ -303,7 +276,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           下载安装包
         </a>
-        <div class="hint"><code>about:debugging</code> → 临时加载附加组件（AI 操控仅 Chromium 版）</div>
+        <div class="hint"><code>about:debugging</code> → 临时加载附加组件</div>
       </div>
     </div>
 
@@ -330,37 +303,6 @@
       <div class="glass feat reveal"><div class="icon">🎯</div><h3>专注模式</h3><p>威胁评分 + 时段敏感性 + 强化学习提醒时机；事件回放时间轴、分心原因速记。</p></div>
       <div class="glass feat reveal"><div class="icon">💾</div><h3>会话存档</h3><p>恢复最近关闭的标签 / 窗口，自定义会话随时存取。</p></div>
       <div class="glass feat reveal"><div class="icon">⬇️</div><h3>下载管理</h3><p>查看、打开文件 / 所在文件夹、按条件移除记录。</p></div>
-    </div>
-  </section>
-
-  <!-- BrowserPilot -->
-  <section id="browserpilot">
-    <div class="sec-head reveal">
-      <div class="kicker">BrowserPilot</div>
-      <h2>让网页端 AI 安全地替你操作浏览器</h2>
-      <p>在 Kimi / DeepSeek / MiniMax 里说一句话，AI 就能点击、输入、滚动、读取页面——每一步都在确认协议之下。</p>
-    </div>
-    <div class="bp-wrap">
-      <div class="glass bp-panel reveal">
-        <h3>安全模型</h3>
-        <p>BrowserPilot 的每一层都为「不出事」设计：</p>
-        <ul>
-          <li>白名单站点：仅三个 AI 对话页可注入桥接协议</li>
-          <li>目标页锁定：操作只作用于你指定的非 AI 标签页</li>
-          <li>敏感操作双确认：AI 先文字确认，插件再弹独立确认窗</li>
-          <li>TOCTOU 复核：确认后重验目标元素与页面</li>
-          <li>无任意执行：<code style="color:var(--accent3)">browser_execute</code> 刻意不实现</li>
-          <li>默认关闭：不开开关，桥接一行代码都不会跑</li>
-        </ul>
-      </div>
-      <div class="glass chat-demo reveal" id="chat-demo">
-        <div class="chat-line user" style="animation-delay:.2s"><span class="who">你 ›</span> <span class="msg">帮我在京东搜索 iPhone 15，打开第一个商品</span></div>
-        <div class="chat-line tool" style="animation-delay:.9s"><span class="who">tool_call ›</span> <span class="msg">{"tool":"browser_navigate","args":{"url":"https://www.jd.com"}}</span></div>
-        <div class="chat-line tool" style="animation-delay:1.6s"><span class="who">tool_result ›</span> <span class="msg">{"success":true,"current_url":"https://www.jd.com/"}</span></div>
-        <div class="chat-line tool" style="animation-delay:2.3s"><span class="who">tool_call ›</span> <span class="msg">{"tool":"browser_type","args":{"selector":"#search-input","value":"iPhone 15","pressEnter":true}}</span></div>
-        <div class="chat-line tool" style="animation-delay:3s"><span class="who">tool_result ›</span> <span class="msg">{"success":true,"current_url":"https://search.jd.com/…"}</span></div>
-        <div class="chat-line" style="animation-delay:3.7s"><span class="who">AI ›</span> <span class="msg">已打开「Apple iPhone 15」商品页 ✓ <span class="cursor-blink"></span></span></div>
-      </div>
     </div>
   </section>
 

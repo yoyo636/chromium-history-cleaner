@@ -33,13 +33,9 @@ EXCLUDE = {
     'win-installer',
 }
 
-# Firefox 版不含 BrowserPilot：gecko manifest 未注册 content-bridge，
-# 确认窗/协议文档/弹窗模块在 Firefox 均为死代码，打包时一并剔除。
-FIREFOX_EXCLUDE = {
-    'content-bridge.js', 'browserpilot-protocol.md',
-    'bp-confirm.html', 'bp-confirm.js',
-    os.path.join('modules', 'browserpilot.js'),
-}
+# 平台差异剔除集。BrowserPilot（AI 操控）已于 4.12.0 整体移除，两个平台均无该功能，
+# 目前两平台包内容一致；保留此机制以备将来出现平台差异。
+FIREFOX_EXCLUDE = set()
 
 # ----------------------- Windows 安装包（NSIS）-----------------------
 WIN_NSIS = os.path.join(ROOT, 'win-installer', 'BrowserCompanion-Setup.nsi')
