@@ -39,7 +39,9 @@
   let allowSet = new Set();
   let domain = '';
   let hiddenCount = 0;
+  let lastReportedCount = 0;   // 上次已上报的隐藏数（上报增量用，避免累计值被重复累加）
   let hidden = new WeakSet();
+  let hiddenEls = [];          // {el, prevDisplay}——本脚本隐藏的元素，关闭时还原
   let mutations = 0;
   let reportTimer = null;
   let sweepTimer = null;
@@ -74,29 +76,26 @@
     if (hidden.has(el)) return false;
     const s = el.style;
     if (s.display === 'none') { hidden.add(el); return false; }
+    const prevDisplay = s.display; // 记录原始内联 display，还原时用
     s.setProperty('display', 'none', 'important');
     hidden.add(el);
+    hiddenEls.push({ el, prevDisplay });
     hiddenCount++;
     return true;
   }
 
-  function sweep() {
-    if (hiddenCount >= MAX_HIDE) return;
-    const els = document.querySelectorAll(SELECTORS);
-    for (let i = 0; i < els.length && hiddenCount < MAX_HIDE; i++) {
-      hideOne(els[i]);
-    }
-  }
-
-  function report() {
+      function report() {
     if (reportTimer) return;
     reportTimer = setTimeout(() => {
       reportTimer = null;
-      if (hiddenCount > 0) {
+      // 上报自上次以来的增量：累计值若直接相加会把同一批隐藏重复计数
+      const delta = hiddenCount - lastReportedCount;
+      if (delta > 0) {
+        lastReportedCount = hiddenCount;
         try {
           chrome.runtime.sendMessage({
             type: 'ADBLOCK_REPORT',
-            payload: { count: hiddenCount, domain: domain },
+            payload: { count: delta, domain: domain },
           });
         } catch (e) { /* 后台未就绪时静默 */ }
       }
@@ -146,9 +145,9 @@
   }
 
   function start() {
-    // 关闭开关或白名单站点：彻底停掉观察与待跑任务
+    // 关闭开关或白名单站点：停掉观察与待跑任务，并把已隐藏的元素还原
     // （顺带修复「关闭后再开启不生效」——原来被 alreadyRan 一次性闸门挡住）
-    if (!enabled || isAllowed()) { teardown(); return; }
+    if (!enabled || isAllowed()) { teardown(); unhideAll(); return; }
     if (observer) return; // 已在运行，避免重复挂观察者
 
     sweep();

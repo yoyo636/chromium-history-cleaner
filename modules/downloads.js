@@ -76,8 +76,9 @@
               onclick: () => {
                 chrome.downloads.erase({ id: x.id });
                 HC.toast('已移除记录');
-                x._gone = true;
-                render();
+                // 旧版只设 _gone 标记但过滤时从不读取，记录仍留在列表里
+                items = items.filter((it) => it.id !== x.id);
+                apply();
               },
             }),
           ]);

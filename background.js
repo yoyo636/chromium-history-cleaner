@@ -431,6 +431,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case 'FOCUS_START':
+      if (fromContentScript(_sender)) return reply(false, null, '仅扩展页可启动专注');
       handleFocusStart(payload, reply);
       return true;
 
@@ -782,22 +783,41 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (!info.audible || !tab.audible) return;
   const dom = domainOf(tab.url || '');
   if (!dom) return;
+  tryAutoMute(tab, dom);
+});
+
+/* 对单个标签应用学习静音（已静音则跳过；标签已关闭时静默失败） */
+function tryAutoMute(tab, dom) {
   chrome.storage.local.get({ audioLearned: {} }, (r) => {
     const learned = r.audioLearned || {};
-    if (learned[dom] === 'mute' && !(tab.mutedInfo && tab.mutedInfo.muted)) {
-      chrome.tabs.update(tabId, { muted: true }, () => {
-        try {
-          chrome.notifications.create('audio-mute-' + tabId, {
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: '🔇 已自动静音（学习记忆）',
-            message: dom + ' 你之前选择静音，本次自动静音。可在「音频」页恢复或取消记忆。',
-          });
-        } catch (_e) {
-          /* 忽略 */
-        }
-      });
-    }
+    if (learned[dom] !== 'mute' || (tab.mutedInfo && tab.mutedInfo.muted)) return;
+    chrome.tabs.update(tab.id, { muted: true }, () => {
+      void chrome.runtime.lastError;
+      try {
+        chrome.notifications.create('audio-mute-' + tab.id, {
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: '🔇 已自动静音（学习记忆）',
+          message: dom + ' 你之前选择静音，本次自动静音。可在「音频」页恢复或取消记忆。',
+        });
+      } catch (_e) {
+        /* 忽略 */
+      }
+    });
+  });
+}
+
+/* SW 唤醒补扫：休眠期间新发声的标签不会触发上面的 audible 边沿，
+ * 重新启动后主动扫一遍全部发声标签，把漏掉的学习静音补上 */
+chrome.storage.local.get({ audioLearned: {} }, (r) => {
+  const learned = r.audioLearned || {};
+  if (!Object.values(learned).includes('mute')) return; // 没有静音记忆就无需扫
+  chrome.tabs.query({ audible: true }, (tabs) => {
+    if (chrome.runtime.lastError) return;
+    (tabs || []).forEach((t) => {
+      const dom = domainOf(t.url || '');
+      if (dom) tryAutoMute(t, dom);
+    });
   });
 });
 
@@ -810,10 +830,51 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
  *     历史可「新增（时间为现在，可指定次数）」与「删除」，不能改已有条目的时间戳/次数
  *     书签可完全增删改；下载记录可删除；Cookie 可改值/删除
  * ========================================================================= */
-const TAMPER_PASS = '248635';
+/* =========================================================================
+ * 密码门禁（开发者模式 / 房地产工具集共用）
+ * - 源码不存任何明文密码：首次启用时用户输入的密码即为该门禁的密码，
+ *   以 SHA-256(随机盐 + 密码) 存 storage.local（devPass / rePass 两个键）。
+ * - 后续输入与哈希比对；连续 5 次失败锁定 60 秒，防在线暴力尝试。
+ * - 诚实边界：纯本地扩展，能直接读 storage 的攻击者本就能改数据，
+ *   此门禁目的是防误触与他人借用浏览器时的快速解锁，非加密级防护。
+ * ========================================================================= */
+const PASS_FAIL_LIMIT = 5;
+const PASS_LOCK_MS = 60e3;
+const passGate = { fails: 0, lockUntil: 0 }; // 连续失败计数与锁定截止（纯内存，SW 重启即清零，可接受）
 
-/* 房地产开发（隐藏工具集）：与开发者模式同款密码门禁，密码在设置里二次输入开/关 */
-const RE_ESTATE_PASS = 'easonwu12345';
+function sha256Hex(text) {
+  return crypto.subtle
+    .digest('SHA-256', new TextEncoder().encode(text))
+    .then((buf) => Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join(''));
+}
+
+// 校验门禁密码：无记录 → 把本次输入设为密码（首次设置）；有记录 → 哈希比对
+async function verifyGatePass(storageKey, pass) {
+  const now = Date.now();
+  if (passGate.lockUntil > now) {
+    return { ok: false, error: '尝试次数过多，请 ' + Math.ceil((passGate.lockUntil - now) / 1000) + ' 秒后再试' };
+  }
+  const rec = await new Promise((resolve) => {
+    chrome.storage.local.get({ [storageKey]: null }, (r) => resolve(r[storageKey] || null));
+  });
+  const salt = rec ? rec.salt : crypto.randomUUID().replace(/-/g, '');
+  const hash = await sha256Hex(salt + '\n' + pass);
+  if (!rec) {
+    chrome.storage.local.set({ [storageKey]: { salt, hash } });
+    passGate.fails = 0;
+    return { ok: true, firstSet: true };
+  }
+  if (hash === rec.hash) {
+    passGate.fails = 0;
+    return { ok: true };
+  }
+  passGate.fails += 1;
+  if (passGate.fails >= PASS_FAIL_LIMIT) {
+    passGate.lockUntil = Date.now() + PASS_LOCK_MS;
+    passGate.fails = 0;
+  }
+  return { ok: false, error: '密码错误' };
+}
 
 /* =========================================================================
  * 广告拦截（Ad-block）
@@ -834,14 +895,14 @@ function getAdblockState() {
         if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.getEnabledRulesets) {
           chrome.declarativeNetRequest.getEnabledRulesets((sets) => {
             if (chrome.runtime.lastError) {
-              resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+              resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal, rulesetOn: true });
               return;
             }
             enabled = (sets || []).includes(ADBLOCK_RULESET_ID);
-            resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+            resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal, rulesetOn: true });
           });
         } else {
-          resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal });
+          resolve({ enabled, allow: r.adblockAllow || [], today: r.adblockToday, total: r.adblockTotal, rulesetOn: false });
         }
       }
     );
@@ -896,11 +957,8 @@ function syncAllowRules() {
           resourceTypes: ['script', 'image', 'stylesheet', 'xmlhttprequest', 'sub_frame', 'ping', 'font', 'media', 'websocket', 'other'],
         },
       }));
-      const removeIds = hosts.length
-        ? []
-        : []; // updateDynamicRules 用 addRules / removeRuleIds 时需要先取旧 id
       chrome.declarativeNetRequest.getDynamicRules((existing) => {
-        const oldIds = (existing || []).map((x) => x.id);
+        const oldIds = (existing || []).map((x) => x.id); // 先取旧 id，整体替换
         chrome.declarativeNetRequest.updateDynamicRules(
           { addRules: rules, removeRuleIds: oldIds },
           () => {
@@ -929,11 +987,13 @@ function bumpAdblockCount(n) {
   });
 }
 
-function handleReEstateUnlock(payload, reply) {
+async function handleReEstateUnlock(payload, reply) {
   const pass = String(payload.pass || '');
-  if (pass !== RE_ESTATE_PASS) return reply(false, null, '密码错误');
+  if (!pass) return reply(false, null, '密码不能为空');
+  const r = await verifyGatePass('rePass', pass);
+  if (!r.ok) return reply(false, null, r.error);
   chrome.storage.local.set({ reEstateUnlocked: !!payload.on }, () =>
-    reply(true, { unlocked: !!payload.on }));
+    reply(true, { unlocked: !!payload.on, firstSet: r.firstSet || false }));
 }
 
 function tamperReady() {
@@ -942,10 +1002,13 @@ function tamperReady() {
   });
 }
 
-function handleTamperSetDev(payload, reply) {
+async function handleTamperSetDev(payload, reply) {
   const pass = String(payload.pass || '');
-  if (pass !== TAMPER_PASS) return reply(false, null, '密码错误');
-  chrome.storage.local.set({ devMode: !!payload.on }, () => reply(true, { devMode: !!payload.on }));
+  if (!pass) return reply(false, null, '密码不能为空');
+  const r = await verifyGatePass('devPass', pass);
+  if (!r.ok) return reply(false, null, r.error);
+  chrome.storage.local.set({ devMode: !!payload.on }, () =>
+    reply(true, { devMode: !!payload.on, firstSet: r.firstSet || false }));
 }
 
 /* 列表：history / bookmarks / downloads / cookies */

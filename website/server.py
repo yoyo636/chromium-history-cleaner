@@ -18,9 +18,12 @@
 import json
 import os
 import re
+import threading
 import time
 import zipfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+STATS_LOCK = threading.Lock()  # 下载计数读改写加锁（多线程服务器下并发会丢计数）
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(ROOT)
@@ -137,10 +140,11 @@ class Handler(SimpleHTTPRequestHandler):
         if not os.path.exists(p["path"]):
             return self.send_json({"error": "安装包尚未生成，请先运行 build_all.py"}, 503)
 
-        stats = load_stats()
-        stats[target] = stats.get(target, 0) + 1
-        stats["total"] = stats.get("total", 0) + 1
-        save_stats(stats)
+        with STATS_LOCK:
+            stats = load_stats()
+            stats[target] = stats.get(target, 0) + 1
+            stats["total"] = stats.get("total", 0) + 1
+            save_stats(stats)
 
         size = os.path.getsize(p["path"])
         self.send_response(200)

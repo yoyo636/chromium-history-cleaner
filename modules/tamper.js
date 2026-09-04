@@ -54,6 +54,7 @@
       onclick: async () => {
         const resp = await send('TAMPER_SET_DEV', { on: true, pass: pass.value });
         if (resp.ok) {
+          if (resp.data && resp.data.firstSet) HC.toast('密码已设置，请牢记', 'success');
           HC.toast('开发者模式已开启', 'success');
           renderPanel(root);
         } else {
@@ -68,7 +69,7 @@
         HC.el('div', {
           class: 'opt-desc',
           style: 'margin:6px 0 12px;',
-          text: '篡改功能可修改浏览器内部数据（历史 / 书签 / 下载 / Cookie）。输入密码启用；再次输入相同密码即可关闭。',
+          text: '篡改功能可修改浏览器内部数据（历史 / 书签 / 下载 / Cookie）。首次输入的密码将设为访问密码（仅存本机哈希，请牢记）；之后每次开启 / 关闭都需输入。',
         }),
         pass,
         HC.el('div', { style: 'height:10px;' }),

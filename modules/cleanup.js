@@ -77,6 +77,7 @@
 
       const scanBtn = HC.el('button', { class: 'btn', text: '重新扫描', onclick: scan });
       const runBtn = HC.el('button', { class: 'btn btn-danger', text: '执行清理', onclick: doClean });
+      scopeSel.addEventListener('change', scan); // 扫描结果跟随所选范围
 
       root.appendChild(HC.el('div', { class: 'row nowrap glass' }, [HC.el('span', { class: 'lbl', text: '时间范围' }), scopeSel, scanBtn]));
       root.appendChild(HC.el('div', { class: 'row glass' }, [HC.el('span', { class: 'lbl', text: '清理项与占用' })]));
@@ -110,14 +111,18 @@
 
       function scan() {
         cleared = {};
+        /* 扫描必须跟随所选时间范围，否则用户选「最近 1 小时」看到的
+         * 却是全部时间的统计，与实际将清理的范围不一致 */
+        const scope = SCOPES.find((s) => s[0] === scopeSel.value) || SCOPES[SCOPES.length - 1];
+        const since = scope[2] === 0 ? 0 : Date.now() - scope[2];
         TYPES.forEach(({ key }) => {
           badgeEls[key].textContent = '扫描中…';
           badgeEls[key].className = 'size-badge na';
           detailEls[key].textContent = '';
         });
 
-        // 1) 浏览历史：条数 / 跨度 / 域名
-        HC.callBackground('SEARCH_STATS', { startTime: 0, endTime: Date.now() })
+        // 1) 浏览历史：条数 / 跨度 / 域名（按所选范围）
+        HC.callBackground('SEARCH_STATS', { startTime: since, endTime: Date.now() })
           .then((s) => {
             if (!s) return;
             const spanDays = s.earliest
@@ -132,9 +137,11 @@
           })
           .catch(() => setInfo('history', '—', '统计失败'));
 
-        // 2) 下载记录：真实文件大小（GB）+ 最大文件
+        // 2) 下载记录：真实文件大小（GB）+ 最大文件（同样按所选范围过滤）
         chrome.downloads.search({ limit: 1000 }, (items) => {
-          const list = items || [];
+          const list = (items || []).filter(
+            (i) => !since || (i.startTime && new Date(i.startTime).getTime() >= since)
+          );
           const comp = list.filter(
             (i) => i.state === 'complete' && typeof i.fileSize === 'number'
           );

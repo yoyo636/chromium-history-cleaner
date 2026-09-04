@@ -10,8 +10,8 @@
 
 | 包 | 适用商店 | 文件 |
 | --- | --- | --- |
-| Chromium 通用包（v4.10.0） | Chrome Web Store、Microsoft Edge Add-ons、Opera Add-ons、Tabbit、Brave、Arc 等所有 Chromium 内核浏览器 | `dist-packages/browser-companion-chromium.zip` |
-| Firefox 包（v4.10.0） | Firefox Add-ons（AMO） | `dist-packages/browser-companion-firefox.zip` |
+| Chromium 通用包（v4.13.0） | Chrome Web Store、Microsoft Edge Add-ons、Opera Add-ons、Tabbit、Brave、Arc 等所有 Chromium 内核浏览器 | `dist-packages/browser-companion-chromium.zip` |
+| Firefox 包（v4.13.0） | Firefox Add-ons（AMO） | `dist-packages/browser-companion-firefox.zip` |
 
 重新生成：`python3 chromium-history-manager/build_all.py`
 
@@ -50,7 +50,7 @@
 
 **中文版**
 
-浏览器搭子是一款集 12 大实用功能于一体的浏览器伴侣，液态玻璃界面，一套代码兼容 Chrome、Edge、Opera、Tabbit、Firefox 等主流浏览器。
+浏览器搭子是一款集 13 大实用功能于一体的浏览器伴侣，液态玻璃界面，一套代码兼容 Chrome、Edge、Opera、Tabbit、Firefox 等主流浏览器。
 
 主要功能：
 - 📜 历史：按时间（今天/7 天/30 天/全部时间）查询预览，全量获取，实时过滤，多选/单条/按范围删除，导出 JSON/CSV。
@@ -64,6 +64,7 @@
 - ⚡ 性能：标签 CPU 繁忙度/内存/帧率透视，一键冻结或关闭高耗能标签，持续高负载预警。
 - 🔊 音频：识别发声标签，频谱分类（人声/音乐/广告），智能静音与域名记忆。
 - 🛡️ 隐私：监控 Canvas/WebGL 指纹调用，一键随机化加固，跨站追踪图谱。
+- 🚫 广告拦截：网络层拦截常见广告/追踪域名（191 条规则），页面内隐藏广告容器，支持按站点放行与拦截计数。
 - ⚙️ 设置：主题（跟随系统/亮/暗）、默认时间范围、清理确认开关。
 
 隐私与安全：
@@ -74,7 +75,7 @@
 
 **English version**
 
-Browser Companion bundles 12 practical tools into a single lightweight popup with a liquid-glass UI. One codebase, built on Manifest V3, works across Chrome, Edge, Opera, Tabbit, Firefox and other Chromium-based browsers.
+Browser Companion bundles 13 practical tools into a single lightweight popup with a liquid-glass UI. One codebase, built on Manifest V3, works across Chrome, Edge, Opera, Tabbit, Firefox and other Chromium-based browsers.
 
 What it does:
 
@@ -89,6 +90,7 @@ What it does:
 - ⚡ **Performance** — Per-tab CPU busyness, heap memory and frame-rate at a glance; freeze (discard) or close heavy tabs with one click; alerts when a tab stays under sustained high load.
 - 🔊 **Audio** — Lists every audible tab, classifies audio via spectrum analysis (voice / music / ad), and lets you mute selectively with domain-level memory.
 - 🛡️ **Privacy** — Monitors Canvas / WebGL fingerprint calls, offers one-click fingerprint randomization, and surfaces a cross-site tracking map.
+- 🚫 **Ad-block** — Blocks common ad & tracking domains at the network layer (191 rules), hides ad containers on pages, with per-site allow-list and block counters.
 - ⚙️ **Settings** — Theme (system / light / dark), default history range, and a cleanup-confirmation toggle.
 
 Privacy & security:
@@ -184,4 +186,4 @@ Privacy & security:
 
 ---
 
-*版本 v4.10.0 · 2026-08-31*
+*版本 v4.13.0 · 2026-09-03*

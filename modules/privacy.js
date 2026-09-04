@@ -15,14 +15,20 @@
 
   const RISK = {
     canvas: { lv: 3, label: 'Canvas 指纹', hint: '通过画布渲染像素识别设备（无痕下仍有效）' },
-    'canvas-read': { lv: 3, label: 'Canvas 读取', hint: '读取画布像素数据用于指纹' },
     webgl: { lv: 2, label: 'WebGL 指纹', hint: '读取 GPU 厂商/渲染器信息识别设备' },
     ua: { lv: 1, label: 'UA 读取', hint: '浏览器标识（无痕下与普通一致）' },
     fonts: { lv: 2, label: '字体测量', hint: '测量字体渲染差异（无痕下可识别）' },
   };
+  /* 事件 api 形如 canvas-getImageData / webgl-readPixels（带方法后缀），
+   * 按前缀归到 canvas / webgl 族再查风险表；直接整串查永远 miss，
+   * 会导致风险等级全部落到默认、Canvas/WebGL 统计卡恒为 0 */
+  function riskOf(api) {
+    const k = String(api || '').split('-')[0];
+    return RISK[k] || { lv: 2, label: String(api || ''), hint: '' };
+  }
 
   function riskBadge(api) {
-    const r = RISK[api] || { lv: 2, label: api, hint: '' };
+    const r = riskOf(api);
     const cls = r.lv >= 3 ? 'red' : r.lv === 2 ? 'yellow' : 'green';
     return HC.el('span', { class: 'size-badge ' + cls, text: '风险 ' + r.lv });
   }
@@ -70,9 +76,10 @@
       modeSel,
     ]));
 
-    // 统计卡
-    const canvasCount = events.filter((e) => e.api === 'canvas' || e.api === 'canvas-read').reduce((s, e) => s + e.count, 0);
-    const webglCount = events.filter((e) => e.api === 'webgl').reduce((s, e) => s + e.count, 0);
+    // 统计卡（api 按前缀归族：canvas-* / webgl-*）
+    const family = (e) => String(e.api || '').split('-')[0];
+    const canvasCount = events.filter((e) => family(e) === 'canvas').reduce((s, e) => s + e.count, 0);
+    const webglCount = events.filter((e) => family(e) === 'webgl').reduce((s, e) => s + e.count, 0);
     const hosts = new Set(events.map((e) => e.host));
     const incognitoHits = events.filter((e) => e.incognito).length;
 
@@ -112,13 +119,13 @@
     }
 
     // 风险清单（按风险等级排序）
-    const sorted = [...events].sort((a, b) => (RISK[b.api] ? RISK[b.api].lv : 0) - (RISK[a.api] ? RISK[a.api].lv : 0)).slice(0, 30);
+    const sorted = [...events].sort((a, b) => riskOf(b.api).lv - riskOf(a.api).lv).slice(0, 30);
     const listBox = HC.el('div', { class: 'row glass' }, [
       HC.el('div', { class: 'block', style: 'flex:1;width:100%;' }, [
         HC.el('div', { class: 'section-title', text: '具体风险项（站点 × 指纹 API）' }),
         HC.el('div', { class: 'clean-list', style: 'margin-top:8px;max-height:260px;' }, [
           sorted.length ? sorted.map((e) => {
-            const r = RISK[e.api] || { label: e.api, hint: '' };
+            const r = riskOf(e.api);
             return HC.el('div', { class: 'clean-item' }, [
               riskBadge(e.api),
               HC.el('div', { class: 'clean-body' }, [

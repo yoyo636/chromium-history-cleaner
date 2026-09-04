@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "浏览器搭子 · 历史与标签页管家",
-  "version": "4.12.0",
+  "version": "4.13.0",
   "description": "实用的跨浏览器搭子：历史清理、标签管理、书签去重、下载管理、浏览数据清理、会话存档、数据统计、视觉疲劳自适应护眼、标签页性能透视、音频静音管理、无痕追踪防护。兼容 Chromium 内核与 Firefox。",
   "browser_specific_settings": {
     "gecko": {

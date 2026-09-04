@@ -45,13 +45,14 @@
         const cur = await new Promise((res) => chrome.storage.local.get({ devMode: false }, (r) => res(!!r.devMode)));
         const pass = await HC.prompt({
           title: cur ? '关闭开发者模式' : '开启开发者模式',
-          body: cur ? '再次输入相同密码即可关闭' : '输入开发者密码以启用「篡改」功能',
+          body: cur ? '再次输入相同密码即可关闭' : '首次输入的密码将设为访问密码（仅存本机哈希，请牢记）。之后每次开启 / 关闭都需输入此密码',
           placeholder: '密码',
         });
         if (pass == null || !pass) return;
         chrome.runtime.sendMessage({ type: 'TAMPER_SET_DEV', payload: { on: !cur, pass } }, (resp) => {
           if (chrome.runtime.lastError) return HC.toast(chrome.runtime.lastError.message, 'error');
           if (resp && resp.ok) {
+            if (!cur && resp.data && resp.data.firstSet) HC.toast('密码已设置，请牢记', 'success');
             HC.toast(!cur ? '开发者模式已开启，可在「更多 → 开发者·篡改」使用' : '开发者模式已关闭', 'success');
             refreshDevBtn(!cur);
           } else HC.toast((resp && resp.error) || '密码错误', 'error');
@@ -70,13 +71,14 @@
           chrome.storage.local.get({ reEstateUnlocked: false }, (r) => res(!!r.reEstateUnlocked)));
         const pass = await HC.prompt({
           title: cur ? '关闭房地产开发' : '开启房地产开发',
-          body: cur ? '再次输入相同密码即可关闭' : '输入访问密码以启用房地产开发工具（入口出现在「更多」面板）',
+          body: cur ? '再次输入相同密码即可关闭' : '首次输入的密码将设为访问密码（仅存本机哈希，请牢记）。输入密码以启用房地产开发工具（入口出现在「更多」面板）',
           placeholder: '密码',
         });
         if (pass == null || !pass) return;
         chrome.runtime.sendMessage({ type: 'RE_SET_UNLOCK', payload: { on: !cur, pass } }, (resp) => {
           if (chrome.runtime.lastError) return HC.toast(chrome.runtime.lastError.message, 'error');
           if (resp && resp.ok) {
+            if (!cur && resp.data && resp.data.firstSet) HC.toast('密码已设置，请牢记', 'success');
             HC.toast(cur ? '房地产开发已关闭' : '已解锁：入口在「更多 → 房地产开发」', 'success');
             refreshReBtn(!cur);
             if (window.__refreshMorePanel) window.__refreshMorePanel();

@@ -65,7 +65,20 @@
     }
     statEl.textContent = statText();
 
+    /* 每 1s 只做本地倒计时渲染，每 5s 才向后台拉真实状态。
+     * 旧版两个间隔都直接发 FOCUS_STATE：每 5 秒并发两条重复消息，
+     * 且事件流每秒重建一次 DOM（点「原因」chip 容易被重建打断）。 */
+    function paint() {
+      remainEl.textContent = fmt(st.timeLeftMs);
+      const total = st.focus.until - st.focus.start;
+      barFill.style.width = Math.min(100, ((total - st.timeLeftMs) / total) * 100).toFixed(1) + '%';
+    }
     function tick() {
+      if (!root.isConnected) { clearInterval(timer); clearInterval(pollTimer); return; }
+      st.timeLeftMs -= 1000; // 本地扣减，5s 后以后台数据为准
+      paint();
+    }
+    function poll() {
       if (!root.isConnected) { clearInterval(timer); clearInterval(pollTimer); return; }
       send('FOCUS_STATE').then((s2) => {
         if (!s2.ok || !s2.data || !s2.data.active) {
@@ -75,16 +88,14 @@
           return;
         }
         st = s2.data;
-        remainEl.textContent = fmt(st.timeLeftMs);
-        const total = st.focus.until - st.focus.start;
-        barFill.style.width = Math.min(100, ((total - st.timeLeftMs) / total) * 100).toFixed(1) + '%';
+        paint();
         statEl.textContent = statText();
         renderRecent(st.recent || []);
       });
     }
-    tick();
+    poll();
     const timer = setInterval(tick, 1000);
-    const pollTimer = setInterval(tick, 5000);
+    const pollTimer = setInterval(poll, 5000);
 
     /* Day5：给「忍住 / 破戒」事件补一句原因（威胁评分会按此加权） */
     function reasonRow(e) {
@@ -100,7 +111,7 @@
         row.appendChild(HC.el('button', {
           class: 'mini', text: label,
           onclick: () => send('FOCUS_REASON', { t: e.t, host: e.host, reason: id }).then((r) => {
-            if (r.ok) { HC.toast('已记录：' + label, 'success'); tick(); }
+            if (r.ok) { HC.toast('已记录：' + label, 'success'); poll(); }
             else HC.toast(r.error || '记录失败', 'error');
           }),
         }));

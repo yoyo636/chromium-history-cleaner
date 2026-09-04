@@ -89,11 +89,11 @@
             text: allowed ? '已放行 · 点此恢复拦截' : '在此站点允许广告',
             onclick: () => {
               if (allowed) {
-                HC.callBackground('ADBLOCK_UNALLOW', { domain })
+                HC.callBackground('ADBLOCK_UNALLOW', { host: domain })
                   .then((r) => { state.allow = r.allow; refreshSite(); HC.toast('已恢复拦截：' + domain); })
                   .catch((e) => HC.toast('操作失败：' + e.message, 'error'));
               } else {
-                HC.callBackground('ADBLOCK_ALLOW', { domain })
+                HC.callBackground('ADBLOCK_ALLOW', { host: domain })
                   .then((r) => { state.allow = r.allow; refreshSite(); HC.toast('已允许广告：' + domain); })
                   .catch((e) => HC.toast('操作失败：' + e.message, 'error'));
               }
@@ -112,7 +112,7 @@
                 class: 'btn btn-ghost', style: 'padding:3px 10px;font-size:12px;',
                 text: '移除',
                 onclick: () => {
-                  HC.callBackground('ADBLOCK_UNALLOW', { domain: d })
+                  HC.callBackground('ADBLOCK_UNALLOW', { host: d })
                     .then((r) => { state.allow = r.allow; refreshSite(); })
                     .catch((e) => HC.toast('操作失败：' + e.message, 'error'));
                 },

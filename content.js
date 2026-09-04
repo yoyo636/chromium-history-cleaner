@@ -199,7 +199,8 @@
     if (!ENGINE || coaching) return;
     const s = ENGINE.summary();
     if (level >= 2) continuousActiveMin += 1; // 每 REPORT_MS 一格
-    if (continuousActiveMin >= 20 && s.confidence >= 0.4) {
+    // summary().confidence 是 0-100 刻度（引擎四舍五入 ×100）
+    if (continuousActiveMin >= 20 && s.confidence >= 40) {
       coaching = true;
       continuousActiveMin = 0;
       const tip = getTip();

@@ -408,10 +408,14 @@
           name = 'history_' + (range ? `${fmtDate(range[0])}_${fmtDate(range[1])}` : 'all') + '.json';
         } else {
           const head = '﻿标题,网址,最后访问,访问次数\r\n';
+          /* CSV 转义 = 单元格内双引号翻倍；这里不能用 HTML 转义
+           * （标题里的 & < > 会被写成 &amp; 等实体，导出数据失真） */
+          const csvCell = (s) =>
+            '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
           const rows = data
             .map(
               (x) =>
-                `"${HC.escapeHtml(x.title || '')}","${x.url}","${HC.formatTime(x.lastVisitTime)}",${x.visitCount || 0}`
+                `${csvCell(x.title || '')},${csvCell(x.url)},${csvCell(HC.formatTime(x.lastVisitTime))},${x.visitCount || 0}`
             )
             .join('\r\n');
           content = head + rows + '\r\n';
