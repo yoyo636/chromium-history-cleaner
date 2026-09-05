@@ -84,6 +84,34 @@
     return true;
   }
 
+  /** 全量扫一遍选择器，隐藏尚未处理的广告容器（受 MAX_HIDE 封顶） */
+  function sweep() {
+    if (hiddenCount >= MAX_HIDE) return;
+    const nodes = document.querySelectorAll(SELECTORS);
+    for (let i = 0; i < nodes.length && hiddenCount < MAX_HIDE; i++) {
+      const el = nodes[i];
+      // 跳过已被本脚本隐藏的祖先下的元素：已不可见，不重复计数
+      let anc = el.parentElement;
+      while (anc && anc !== document.documentElement) {
+        if (hidden.has(anc)) { i = nodes.length; break; } // 跳出外层 for
+        anc = anc.parentElement;
+      }
+      if (i >= nodes.length) continue; // 命中跳过标记
+      hideOne(el);
+    }
+  }
+
+  /** 关闭开关 / 站点加入白名单时，把本脚本隐藏的元素全部还原 */
+  function unhideAll() {
+    hiddenEls.forEach(({ el, prevDisplay }) => {
+      try { el.style.setProperty('display', prevDisplay, ''); } catch (e) { /* 已脱离文档 */ }
+    });
+    hiddenEls = [];
+    hidden = new WeakSet();
+    hiddenCount = 0;
+    lastReportedCount = 0;
+  }
+
       function report() {
     if (reportTimer) return;
     reportTimer = setTimeout(() => {

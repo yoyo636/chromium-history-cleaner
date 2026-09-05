@@ -486,6 +486,47 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       bumpAdblockCount(payload.count || 0).then(() => reply(true, true)).catch(() => reply(true, true));
       return true;
 
+    /* --------------------------- 网页文章下载 ---------------------------
+     * ARTICLE_BUILD：代理到活动标签页的内容脚本做「提取 + 图片内联 + 组装 HTML」，
+     *                回给弹窗预览与下载入口。
+     * ARTICLE_DOWNLOAD：把 HTML 内容以 data: URL 触发 chrome.downloads.download
+     *                 保存到用户指定位置（自包含 HTML，离线可看）。 */
+    case 'ARTICLE_BUILD':
+      (async () => {
+        try {
+          const tabs = await new Promise((r) =>
+            chrome.tabs.query({ active: true, currentWindow: true }, (t) => r(t || [])));
+          const tab = (tabs || [])[0];
+          if (!tab) return reply(false, null, '找不到活动标签页');
+          if (!tab.url || !/^https?:/.test(tab.url)) return reply(false, null, '当前标签页不是网页');
+          const resp = await new Promise((res) =>
+            chrome.tabs.sendMessage(tab.id, { type: 'ARTICLE_EXTRACT_AND_BUILD' }, (x) => res(x)));
+          if (chrome.runtime.lastError) return reply(false, null, '内容脚本未就绪，请刷新页面后重试');
+          if (!resp) return reply(false, null, '提取失败（空响应）');
+          if (!resp.ok) return reply(false, null, resp.error || '提取失败');
+          reply(true, resp);
+        } catch (e) { reply(false, null, e && e.message ? e.message : String(e)); }
+      })();
+      return true;
+
+    case 'ARTICLE_DOWNLOAD':
+      (async () => {
+        try {
+          const html = String(payload.html || '');
+          const filename = String(payload.filename || 'article.html');
+          if (!html) return reply(false, null, '缺少内容');
+          // data: URL 可承载大体积（含 base64 图片），由浏览器原生下载到本地
+          const url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+          await new Promise((resolve, reject) =>
+            chrome.downloads.download({ url, filename, saveAs: true }, (id) => {
+              if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+              else resolve(id);
+            }));
+          reply(true, { filename });
+        } catch (e) { reply(false, null, e && e.message ? e.message : String(e)); }
+      })();
+      return true;
+
     default:
       reply(false, null, '未知的消息类型: ' + type);
       return false;
@@ -958,7 +999,9 @@ function syncAllowRules() {
         },
       }));
       chrome.declarativeNetRequest.getDynamicRules((existing) => {
-        const oldIds = (existing || []).map((x) => x.id); // 先取旧 id，整体替换
+        const oldIds = (existing || [])
+          .map((x) => x.id)
+          .filter((id) => id >= _allowRuleId); // 只清理本模块规则段，避免误删其他功能的动态规则
         chrome.declarativeNetRequest.updateDynamicRules(
           { addRules: rules, removeRuleIds: oldIds },
           () => {
