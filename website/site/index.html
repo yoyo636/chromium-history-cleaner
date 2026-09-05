@@ -262,7 +262,7 @@
         <div class="os">Chromium 内核</div>
         <div class="name">Chromium 版</div>
         <div class="meta" id="meta-chromium">Chrome · Edge · Opera · Brave · Arc<br>加载中…</div>
-        <a class="dl-btn" id="dl-chromium" href="/api/download?target=chromium">
+        <a class="dl-btn" id="dl-chromium" href="/downloads/browser-companion-chromium.zip">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           下载安装包
         </a>
@@ -272,7 +272,7 @@
         <div class="os">Gecko 内核</div>
         <div class="name">Firefox 版</div>
         <div class="meta" id="meta-firefox">Firefox 126+<br>加载中…</div>
-        <a class="dl-btn" id="dl-firefox" href="/api/download?target=firefox">
+        <a class="dl-btn" id="dl-firefox" href="/downloads/browser-companion-firefox.zip">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           下载安装包
         </a>
@@ -459,6 +459,21 @@
     var d = new Date(ts * 1000);
     return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
   }
+  // 静态托管降级：API 不可用时把下载按钮指向直链文件
+  function fallbackToStatic() {
+    ["chromium", "firefox"].forEach(function (t) {
+      var a = document.getElementById("dl-" + t);
+      if (a) a.href = "/downloads/browser-companion-" + t + ".zip";
+    });
+    ["chromium", "firefox"].forEach(function (k) {
+      var el = document.getElementById("meta-" + k);
+      if (el) el.innerHTML =
+        (k === "chromium" ? "Chrome · Edge · Opera · Brave · Arc · Tabbit" : "Firefox 126+（AMO 包）")
+        + "<br>版本 " + (document.getElementById("ver").textContent || "4.13") + " · 点击下方直链下载";
+    });
+    var c = document.getElementById("dl-count");
+    if (c) c.textContent = "—";
+  }
   fetch("/api/version").then(function (r) { return r.json(); }).then(function (v) {
     document.getElementById("ver").textContent = v.version;
     ["chromium", "firefox"].forEach(function (k) {
@@ -468,10 +483,13 @@
       if (el) el.innerHTML =
         p.browsers.replace(/</g, "&lt;") + "<br>约 " + fmtSize(p.size_kb) + " · 更新 " + fmtDate(p.mtime);
     });
-  }).catch(function () {});
+  }).catch(fallbackToStatic);
   fetch("/api/stats").then(function (r) { return r.json(); }).then(function (s) {
     document.getElementById("dl-count").textContent = s.total || 0;
-  }).catch(function () {});
+  }).catch(function () {
+    var c = document.getElementById("dl-count");
+    if (c) c.textContent = "—";
+  });
 })();
 
 /* ================= 滚动入场 ================= */

@@ -136,6 +136,10 @@ class Handler(SimpleHTTPRequestHandler):
         target = (q.get("target", ["chromium"])[0] or "").lower()
         if target not in PACKAGES:
             return self.send_json({"error": "target 必须是 chromium 或 firefox"}, 400)
+        return self.serve_download(target)
+
+    def serve_download(self, target):
+        """实际的下载响应（计数 + 正确文件名/头）。/api/download 与 /downloads/ 共用。"""
         p = PACKAGES[target]
         if not os.path.exists(p["path"]):
             return self.send_json({"error": "安装包尚未生成，请先运行 build_all.py"}, 503)
@@ -173,6 +177,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.api_stats()
         if path == "/api/download":
             return self.api_download()
+        # 静态直链路径：/downloads/browser-companion-chromium.zip
+        # 兼容「无 Python 后端的静态托管」——下载按钮用的是这个路径，
+        # 有 Python 后端时这里同样计数并给出正确文件名。
+        m = re.match(r"^/downloads/browser-companion-(chromium|firefox)\.zip$", path)
+        if m:
+            return self.serve_download(m.group(1))
         return super().do_GET()
 
     def end_headers(self):

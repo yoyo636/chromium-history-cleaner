@@ -37,6 +37,51 @@ website/
 
 原理：`--web` 会把两个安装包 zip 生成到 `website/dist-packages/`（Render 构建时创建，运行时读取），`server.py` 自动优先使用该目录。注意 Render 免费档重新部署后 `site/.stats.json` 下载计数会清零（无持久磁盘）；需要保留计数可挂载磁盘并把 `SITE_DIR` 指向它，或升级付费档。
 
+## 静态托管（Spookhost / cPanel / GitHub Pages / Vercel 静态导出）
+
+⚠️ **重要**：本项目后端是 **Python**（`server.py`）。Spookhost 等平台默认只跑 PHP / 静态文件，
+**没有 Python 运行环境**，所以 `/api/version`、`/api/download`、`/api/stats` 在这些平台上不可用。
+
+页面已做**自动降级**：检测到 API 不可用时，下载按钮会自动改指向
+`/downloads/browser-companion-<target>.zip` 直链，版本信息显示内置静态文案。
+对 Python 后端（Render / 本地 / VPS）**零影响**——API 可用时行为完全不变。
+
+### 一键打包
+
+```bash
+./website/deploy_static.sh [目标目录]   # 默认 ./website/dist
+```
+
+产出目录结构（直接上传到托管平台根目录）：
+
+```
+index.html
+privacy.html
+icons/
+downloads/
+  browser-companion-chromium.zip
+  browser-companion-firefox.zip
+```
+
+### 上传步骤（以 Spookhost 为例）
+
+1. 在 Spookhost 控制台进入该 Space 的 **File Manager**（或用 FTP）
+2. 把打包产物里的文件全部上传到网站根目录（`public_html` / `httpdocs`）
+3. 确保 `downloads/` 子目录与 `index.html` 在同一级
+4. 访问 `https://你的域名/`，下载按钮应可点击
+
+### 注意事项
+
+- **TLS / CDN 缓存**：Spookhost 走 Cloudflare 自动 TLS。下载 zip 可能被 Cloudflare 缓存，
+  更新安装包后建议在 Cloudflare 的「缓存 → 配置缓存级别」里对该路径设
+  `Cache-Control: no-store`，或用版本号后缀（如 `?v=4.13`）破缓存。
+- **下载计数**：静态托管下 `/api/stats` 不可用，页脚显示 `—`（不报错）。
+  需要真实计数请改用 Python 后端部署。
+- **文件大小**：Chromium 包约 190KB、Firefox 包约 180KB，Spookhost 流量配额内完全没问题。
+- **CSP**：页面已禁止所有外部源，无需托管平台额外配置。
+- **路径**：直链路径是 `/downloads/...`，若平台有子目录（如 `/sub/`），把 `deploy_static.sh`
+  的目标设为该子目录即可，降级逻辑用相对路径自动适配。
+
 ## 其他云平台
 
 任何支持 Python 的平台（Railway / Fly.io / VPS）同理：
