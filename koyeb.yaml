@@ -1,0 +1,17 @@
+# Koyeb 部署配置 — https://koyeb.com
+# 免费档：512MB 持久存储，无需绑卡
+service:
+  name: browser-companion-site
+  regions:
+    - fra          # 法兰克福，也可改 amr / sgp / iad
+  routes:
+    - path: /
+      port: 8765
+build:
+  docker:
+    dockerfile: Dockerfile
+env:
+  - key: PORT
+    value: "8765"
+  - key: PYTHON_VERSION
+    value: "3.12.4"

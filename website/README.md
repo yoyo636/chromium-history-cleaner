@@ -82,6 +82,30 @@ downloads/
 - **路径**：直链路径是 `/downloads/...`，若平台有子目录（如 `/sub/`），把 `deploy_static.sh`
   的目标设为该子目录即可，降级逻辑用相对路径自动适配。
 
+## Koyeb
+
+仓库已含 `koyeb.yaml` + 复用 `Dockerfile`，一键部署（免费档：512MB 持久存储，**无需绑卡**）。
+
+```bash
+# 1. 安装 koyeb CLI（如果还没有）
+curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/main/install.sh | sh
+
+# 2. 登录
+koyeb auth login
+
+# 3. 部署（自动读取 koyeb.yaml）
+koyeb deploy --app browser-companion-site --service browser-companion-site -y
+
+# 4. 查看
+koyeb service ls
+```
+
+也可以在 [koyeb.com](https://koyeb.com) 控制台 → **Create Service** → **Deploy from GitHub**，
+选仓库后自动识别 `koyeb.yaml`。
+
+原理：Koyeb 用 `Dockerfile` 构建镜像（构建时跑 `python3 build_all.py --web` 生成安装包），
+运行时 `server.py` 自动探测 `website/dist-packages/`，`PORT` 环境变量由平台注入。
+
 ## Fly.io
 
 仓库已含 `fly.toml` + `Dockerfile`，一键部署（免费档：3 台共享 VM）。
