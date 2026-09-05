@@ -82,9 +82,51 @@ downloads/
 - **路径**：直链路径是 `/downloads/...`，若平台有子目录（如 `/sub/`），把 `deploy_static.sh`
   的目标设为该子目录即可，降级逻辑用相对路径自动适配。
 
-## 其他云平台
+## Fly.io
 
-任何支持 Python 的平台（Railway / Fly.io / VPS）同理：
+仓库已含 `fly.toml` + `Dockerfile`，一键部署（免费档：3 台共享 VM）。
+
+```bash
+# 1. 安装 flyctl（如果还没有）
+# macOS:  brew install flyctl
+# Linux:  curl -L https://fly.io/install.sh | sh
+
+# 2. 登录
+flyctl auth login
+
+# 3. 在仓库根目录启动（会自动读取 fly.toml）
+flyctl launch
+
+# 4. 查看
+flyctl status
+flyctl open
+```
+
+`fly.toml` 里 `app = "browser-companion-site"`，如果这个名字被占用了，先改：
+```bash
+flyctl apps rename 新名字   # 或编辑 fly.toml 后 flyctl launch --app 新名字
+```
+
+原理：Dockerfile 在构建时跑 `python3 build_all.py --web` 生成安装包，运行时 `server.py`
+自动探测 `website/dist-packages/`。Fly.io 注入 `PORT` 环境变量，`server.py` 自动跟随。
+
+## Railway
+
+```bash
+# 在 Railway 控制台 New Project → 从 GitHub 导入仓库
+# Build Command:  python3 build_all.py --web
+# Start Command: python3 website/server.py
+```
+
+免费档 $5/月额度，够用。
+
+## Render
+
+仓库已含 `render.yaml`，连接 GitHub 仓库即可自动识别（见上方 Render 章节）。
+
+## 其他 VPS / 自有服务器
+
+任何支持 Python 的平台同理：
 
 ```bash
 # 构建命令
