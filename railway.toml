@@ -1,0 +1,8 @@
+# Railway 部署配置 — https://railway.com
+# 免费档：$5/月额度，无需绑卡
+[build]
+  builder = "dockerfile"
+  dockerfile = "Dockerfile"
+
+[deploy]
+  runCommand = "python3 website/server.py"
